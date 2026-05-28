@@ -1,5 +1,7 @@
 import OpenAI from "openai";
 import { API_KEY, BASE_URL, MODEL, MAX_TOKENS, MAX_ITERATIONS } from "./config.js";
+
+const isLocal = BASE_URL.includes("localhost") || BASE_URL.includes("127.0.0.1");
 import { toolDefinitions, executeTool } from "./tools/index.js";
 
 // Build a plain-text description of available tools for the system prompt
@@ -119,10 +121,11 @@ export class Agent {
   constructor(cwd: string) {
     this.cwd = cwd;
     this.client = new OpenAI({
-      apiKey: API_KEY,
+      apiKey: API_KEY || "local",
       baseURL: BASE_URL,
-      defaultHeaders: {
-        "HTTP-Referer": "https://github.com/qwen-qode",
+      // OpenRouter needs attribution headers; local servers ignore them harmlessly
+      defaultHeaders: isLocal ? {} : {
+        "HTTP-Referer": "https://github.com/baberparweez/qwen-qode",
         "X-Title": "Qwen Qode",
       },
     });

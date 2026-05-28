@@ -1,8 +1,8 @@
 # Qwen Qode
 
-A local AI coding agent powered by [Qwen2.5-coder](https://huggingface.co/Qwen/Qwen2.5-Coder-32B-Instruct) via [OpenRouter](https://openrouter.ai). Open any project folder and chat with an agent that can read files, write code, run shell commands, and search your codebase — all through a clean browser UI or a terminal CLI.
+A local AI coding agent powered by [Qwen2.5-coder](https://huggingface.co/Qwen/Qwen2.5-Coder-32B-Instruct). Open any project folder and chat with an agent that can read files, write code, run shell commands, and search your codebase — all through a clean browser UI or a terminal CLI.
 
-![Qwen Qode UI](https://raw.githubusercontent.com/baberparweez/qwen-qode/main/docs/screenshot.png)
+Runs on [OpenRouter](https://openrouter.ai) (cloud, no GPU needed) or fully offline via [Ollama](https://ollama.com) / [LM Studio](https://lmstudio.ai).
 
 ---
 
@@ -13,7 +13,7 @@ A local AI coding agent powered by [Qwen2.5-coder](https://huggingface.co/Qwen/Q
 - **Folder browser** — click through your filesystem to open any project
 - **Terminal CLI** — `qq` command for scripting and headless use
 - **6 built-in tools** — read, write, edit, list, bash, and search
-- **No local GPU required** — runs Qwen2.5-coder-32B via OpenRouter's cloud API
+- **Cloud or local** — use OpenRouter with no setup, or run fully offline via Ollama / LM Studio
 - **ReAct agent loop** — iterative tool use until the task is complete (up to 30 rounds)
 
 ---
@@ -28,7 +28,7 @@ Backend server (localhost:3579)
        │  per-session Agent instance
        ▼
   Agent loop
-  ┌─ Call Qwen2.5-coder via OpenRouter
+  ┌─ Call Qwen2.5-coder (OpenRouter or local server)
   ├─ Parse tool call from response (JSON in <tool_call> tags or raw JSON)
   ├─ Execute tool against the selected project folder
   ├─ Inject result back as context
@@ -42,7 +42,9 @@ The agent uses a **ReAct-style prompting** approach — no native function-calli
 ## Prerequisites
 
 - **Node.js** ≥ 18 (tested on v22)
-- An **[OpenRouter](https://openrouter.ai)** account and API key — free tier works
+- **One of:**
+  - An [OpenRouter](https://openrouter.ai) API key (free tier works) — easiest to get started
+  - [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai) running locally — no API key needed, works offline
 
 ---
 
@@ -57,22 +59,26 @@ npm install
 cd web && npm install && cd ..
 ```
 
-### 2. Add your API key
+### 2. Configure your model provider
 
 ```bash
 cp .env.example .env
 ```
 
-Open `.env` and set your key:
+**Option A — OpenRouter (cloud, no GPU needed):**
 
 ```env
 OPENROUTER_API_KEY=sk-or-v1-your-key-here
 QWEN_MODEL=qwen/qwen-2.5-coder-32b-instruct
 ```
 
-You can get a free API key at [openrouter.ai/keys](https://openrouter.ai/keys). The 32B model is affordable — typical coding sessions cost less than $0.01.
+Get a free API key at [openrouter.ai/keys](https://openrouter.ai/keys). Typical coding sessions cost less than $0.01.
 
-> **Tip:** You can also place your `.env` in `~/.qwen-qode/.env` for a global key that works across all projects.
+**Option B — Ollama or LM Studio (offline, no API key):**
+
+See [Running fully offline with a local model](#running-fully-offline-with-a-local-model) below.
+
+> **Tip:** Place your `.env` in `~/.qwen-qode/.env` to share it across all projects.
 
 ### 3. Build
 
@@ -133,6 +139,67 @@ qq --web
 
 ---
 
+## Running fully offline with a local model
+
+Qwen Qode works with any OpenAI-compatible local model server — no code changes needed, just update `.env`.
+
+### Option A — Ollama (recommended)
+
+[Ollama](https://ollama.com) is the simplest way to run Qwen2.5-coder locally on Mac, Linux, or Windows.
+
+```bash
+# Install Ollama (macOS)
+brew install ollama
+
+# Pull the model — choose a size that fits your RAM:
+ollama pull qwen2.5-coder:7b    # ~4 GB  — works on 8 GB RAM
+ollama pull qwen2.5-coder:14b   # ~8 GB  — good quality, 16 GB RAM
+ollama pull qwen2.5-coder:32b   # ~20 GB — best quality, 32 GB RAM
+```
+
+Then update your `.env`:
+
+```env
+QQ_BASE_URL=http://localhost:11434/v1
+QWEN_MODEL=qwen2.5-coder:32b
+# No API key needed
+```
+
+Start the Ollama server before launching Qwen Qode:
+
+```bash
+ollama serve
+```
+
+If you installed the [Ollama desktop app](https://ollama.com/download) instead of brew, it starts automatically from the menu bar.
+
+### Option B — LM Studio
+
+[LM Studio](https://lmstudio.ai) has a GUI for downloading and running models.
+
+1. Download LM Studio and search for **Qwen2.5-Coder** in the model browser
+2. Load a model and start the local server (default port 1234)
+3. Update `.env`:
+
+```env
+QQ_BASE_URL=http://localhost:1234/v1
+QQ_API_KEY=lm-studio
+QWEN_MODEL=qwen2.5-coder-32b-instruct
+```
+
+### Model size guide
+
+| Model | RAM needed | Quality |
+|---|---|---|
+| `qwen2.5-coder:3b` | ~2 GB | Basic — fast, limited reasoning |
+| `qwen2.5-coder:7b` | ~5 GB | Good — solid for most tasks |
+| `qwen2.5-coder:14b` | ~9 GB | Better — recommended minimum |
+| `qwen2.5-coder:32b` | ~20 GB | Best — matches cloud quality |
+
+> Apple Silicon Macs run these efficiently via Metal GPU acceleration. A 14B model on an M2/M3 MacBook Pro is fast and capable.
+
+---
+
 ## Project structure
 
 ```
@@ -166,24 +233,29 @@ qwen-qode/
 
 | Variable | Default | Description |
 |---|---|---|
-| `OPENROUTER_API_KEY` | — | **Required.** Your OpenRouter API key |
-| `QWEN_MODEL` | `qwen/qwen-2.5-coder-32b-instruct` | Any OpenRouter model slug |
+| `OPENROUTER_API_KEY` | — | Required for cloud mode. Get one at [openrouter.ai/keys](https://openrouter.ai/keys) |
+| `QQ_BASE_URL` | `https://openrouter.ai/api/v1` | Override to point at a local server (Ollama, LM Studio) |
+| `QQ_API_KEY` | — | Generic key override. Not needed for local servers |
+| `QWEN_MODEL` | `qwen/qwen-2.5-coder-32b-instruct` | Model slug — format depends on your provider |
 
-You can swap `QWEN_MODEL` for any other model on OpenRouter — the agent loop works with any model that can follow structured output instructions.
+The agent loop works with any model that can follow structured output instructions — cloud or local.
 
 ---
 
 ## Switching models
 
-Because Qwen Qode uses plain-text tool calling rather than a provider API feature, **any model on OpenRouter works**. Just update `.env`:
+Because Qwen Qode uses plain-text tool calling rather than a provider-specific API feature, **any model works** — cloud or local. Just update `.env`:
 
 ```env
-# Smaller / faster Qwen model
+# Smaller / faster Qwen via OpenRouter
 QWEN_MODEL=qwen/qwen-2.5-coder-7b-instruct
 
-# Or a different provider entirely
+# Different cloud model entirely
 QWEN_MODEL=google/gemini-flash-1.5
-QWEN_MODEL=mistralai/mistral-small
+
+# Local model via Ollama
+QQ_BASE_URL=http://localhost:11434/v1
+QWEN_MODEL=qwen2.5-coder:14b
 ```
 
 ---
@@ -210,4 +282,4 @@ MIT — see [LICENSE](LICENSE).
 
 ## Acknowledgements
 
-Built with [Qwen2.5-coder](https://github.com/QwenLM/Qwen2.5-Coder) by Alibaba Cloud, served via [OpenRouter](https://openrouter.ai), UI built with [Next.js](https://nextjs.org).
+Built with [Qwen2.5-coder](https://github.com/QwenLM/Qwen2.5-Coder) by Alibaba Cloud. Cloud inference via [OpenRouter](https://openrouter.ai). Local inference via [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai). UI built with [Next.js](https://nextjs.org).
