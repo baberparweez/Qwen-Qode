@@ -12,12 +12,14 @@
     "start": "node dist/index.js",
     "web:server": "node dist/index.js --web",
     "web:ui": "npm run dev --prefix web",
-    "web": "concurrently \"npm run web:server\" \"npm run web:ui\""
+    "web": "concurrently \"npm run web:server\" \"npm run web:ui\"",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "chalk": "^5.3.0",
-    "concurrently": "^9.0.0",
     "commander": "^12.1.0",
+    "concurrently": "^9.0.0",
     "dotenv": "^16.4.5",
     "glob": "^11.0.0",
     "openai": "^4.67.0",
@@ -27,7 +29,8 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "vitest": "^4.1.7"
   },
   "type": "module",
   "engines": {

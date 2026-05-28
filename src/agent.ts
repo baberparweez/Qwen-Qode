@@ -59,7 +59,7 @@ export type EventHandler = (event: AgentEvent) => void;
 const TOOL_NAMES = new Set(toolDefinitions.map((t) => t.function.name));
 const TOOL_CALL_RE = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/;
 
-function parseToolCall(text: string): { name: string; args: Record<string, unknown> } | null {
+export function parseToolCall(text: string): { name: string; args: Record<string, unknown> } | null {
   // 1. Tagged format: <tool_call>{...}</tool_call>
   const tagged = TOOL_CALL_RE.exec(text);
   if (tagged) {
@@ -95,7 +95,7 @@ function parseToolCall(text: string): { name: string; args: Record<string, unkno
   return null;
 }
 
-function stripToolCall(text: string): string {
+export function stripToolCall(text: string): string {
   // Remove tagged blocks
   let out = text.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "");
   // Remove raw JSON tool call objects
