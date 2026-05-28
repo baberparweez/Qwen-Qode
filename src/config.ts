@@ -14,12 +14,9 @@ if (!process.env.OPENROUTER_API_KEY && !process.env.QQ_API_KEY && existsSync(hom
   config({ path: homeEnv });
 }
 
-// QQ_BASE_URL overrides OpenRouter — point at Ollama, LM Studio, or any OpenAI-compatible server
 export const BASE_URL =
   process.env.QQ_BASE_URL ?? "https://openrouter.ai/api/v1";
 
-// QQ_API_KEY is the generic key; OPENROUTER_API_KEY kept for backwards compat.
-// Local servers (Ollama, LM Studio) don't need a real key — use "local" as a placeholder.
 export const API_KEY =
   process.env.QQ_API_KEY ?? process.env.OPENROUTER_API_KEY ?? "";
 
@@ -30,6 +27,37 @@ export const MAX_TOKENS = 8192;
 export const MAX_ITERATIONS = 30;
 
 const isLocal = BASE_URL.includes("localhost") || BASE_URL.includes("127.0.0.1");
+
+export interface ModelOption {
+  id: string;
+  name: string;
+  vision: boolean;
+  description: string;
+  warning?: string;
+}
+
+export const MODELS: ModelOption[] = [
+  {
+    id: "qwen/qwen-2.5-coder-32b-instruct",
+    name: "Qwen2.5 Coder 32B",
+    vision: false,
+    description: "Optimised for code — recommended for most tasks",
+  },
+  {
+    id: "qwen/qwen2.5-vl-72b-instruct",
+    name: "Qwen2.5 VL 72B",
+    vision: true,
+    description: "Vision + language — can analyse screenshots and diagrams",
+    warning: "This model supports images but is not specifically fine-tuned for coding. It may be less accurate on complex code tasks than the Coder model.",
+  },
+  {
+    id: "qwen/qwen2.5-vl-7b-instruct",
+    name: "Qwen2.5 VL 7B",
+    vision: true,
+    description: "Vision + language, faster and cheaper — good for quick image questions",
+    warning: "This model supports images but is not specifically fine-tuned for coding. It may be less accurate on complex code tasks than the Coder model.",
+  },
+];
 
 export function assertApiKey(): void {
   if (!API_KEY && !isLocal) {

@@ -11,7 +11,7 @@ export type ToolCallPair = {
 };
 
 export type ChatMessage =
-  | { role: "user"; content: string }
+  | { role: "user"; content: string; images?: string[] }
   | { role: "assistant"; content: string; toolCalls?: ToolCallPair[] }
   | { role: "error"; content: string };
 
@@ -19,4 +19,12 @@ export interface Session {
   id: string;
   projectPath: string;
   model: string;
+}
+
+export interface ModelOption {
+  id: string;
+  name: string;
+  vision: boolean;
+  description: string;
+  warning?: string;
 }

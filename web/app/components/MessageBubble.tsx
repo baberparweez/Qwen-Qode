@@ -73,6 +73,15 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
             lineHeight: 1.6,
           }}
         >
+          {/* Attached images */}
+          {message.role === "user" && message.images && message.images.length > 0 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: message.content ? 8 : 0 }}>
+              {message.images.map((src, i) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img key={i} src={src} alt="" style={{ maxWidth: 200, maxHeight: 160, borderRadius: 8, objectFit: "cover", border: "1px solid var(--border)" }} />
+              ))}
+            </div>
+          )}
           {message.content}
         </div>
       </div>

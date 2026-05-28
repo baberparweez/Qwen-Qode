@@ -2,7 +2,7 @@ import http from "http";
 import { parse as parseUrl } from "url";
 import { existsSync, statSync, readdirSync } from "fs";
 import { resolve, join } from "path";
-import { assertApiKey, MODEL } from "./config.js";
+import { assertApiKey, MODEL, MODELS } from "./config.js";
 import { Agent, type AgentEvent } from "./agent.js";
 
 const PORT = 3579;
@@ -53,7 +53,12 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
   const parsed = parseUrl(req.url ?? "/", true);
   const pathname = parsed.pathname ?? "/";
 
-  // GET /api/browse?path=... — list subdirectories for the folder picker
+  // GET /api/models — list available models
+  if (req.method === "GET" && pathname === "/api/models") {
+    return json(res, 200, MODELS);
+  }
+
+  // GET /api/browse?path=...
   if (req.method === "GET" && pathname === "/api/browse") {
     const raw = String(parsed.query.path ?? HOME);
     const dir = resolve(expandPath(raw));
@@ -61,31 +66,38 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       return json(res, 400, { error: "Not a directory" });
     }
     let entries: string[];
-    try {
-      entries = readdirSync(dir);
-    } catch {
-      return json(res, 403, { error: "Permission denied" });
-    }
+    try { entries = readdirSync(dir); }
+    catch { return json(res, 403, { error: "Permission denied" }); }
     const dirs = entries
       .filter((e) => !IGNORED.has(e) && !e.startsWith("."))
-      .filter((e) => {
-        try { return statSync(join(dir, e)).isDirectory(); } catch { return false; }
-      })
+      .filter((e) => { try { return statSync(join(dir, e)).isDirectory(); } catch { return false; } })
       .sort();
     const parent = dir !== "/" ? resolve(dir, "..") : null;
     return json(res, 200, { path: dir, parent, dirs });
   }
 
-  // POST /api/sessions — create a new session for a project path
+  // POST /api/sessions
   if (req.method === "POST" && pathname === "/api/sessions") {
-    const body = (await readBody(req)) as { projectPath?: string };
+    const body = (await readBody(req)) as { projectPath?: string; model?: string };
     const projectPath = resolve(expandPath(body.projectPath ?? HOME));
     if (!existsSync(projectPath) || !statSync(projectPath).isDirectory()) {
       return json(res, 400, { error: "Invalid project path" });
     }
     const id = makeId();
-    sessions.set(id, new Agent(projectPath));
-    return json(res, 200, { sessionId: id, projectPath, model: MODEL });
+    const model = body.model ?? MODEL;
+    sessions.set(id, new Agent(projectPath, model));
+    return json(res, 200, { sessionId: id, projectPath, model });
+  }
+
+  // POST /api/sessions/:id/model — switch model for an existing session
+  if (req.method === "POST" && pathname?.match(/^\/api\/sessions\/[^/]+\/model$/)) {
+    const id = pathname.split("/")[3];
+    const agent = sessions.get(id);
+    if (!agent) return json(res, 404, { error: "Session not found" });
+    const body = (await readBody(req)) as { model?: string };
+    if (!body.model) return json(res, 400, { error: "model is required" });
+    agent.setModel(body.model);
+    return json(res, 200, { model: body.model });
   }
 
   // DELETE /api/sessions/:id
@@ -110,7 +122,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     const agent = sessions.get(id);
     if (!agent) return json(res, 404, { error: "Session not found" });
 
-    const body = (await readBody(req)) as { message?: string };
+    const body = (await readBody(req)) as { message?: string; images?: string[] };
     if (!body.message?.trim()) return json(res, 400, { error: "message is required" });
 
     res.writeHead(200, {
@@ -125,7 +137,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     };
 
     try {
-      await agent.run(body.message, send);
+      await agent.run(body.message, send, body.images);
     } catch (e) {
       send({ type: "error", message: String(e) });
     }

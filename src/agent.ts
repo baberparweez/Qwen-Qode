@@ -4,7 +4,6 @@ import { API_KEY, BASE_URL, MODEL, MAX_TOKENS, MAX_ITERATIONS } from "./config.j
 const isLocal = BASE_URL.includes("localhost") || BASE_URL.includes("127.0.0.1");
 import { toolDefinitions, executeTool } from "./tools/index.js";
 
-// Build a plain-text description of available tools for the system prompt
 function buildToolDocs(): string {
   return toolDefinitions
     .map((t) => {
@@ -60,7 +59,6 @@ const TOOL_NAMES = new Set(toolDefinitions.map((t) => t.function.name));
 const TOOL_CALL_RE = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/;
 
 export function parseToolCall(text: string): { name: string; args: Record<string, unknown> } | null {
-  // 1. Tagged format: <tool_call>{...}</tool_call>
   const tagged = TOOL_CALL_RE.exec(text);
   if (tagged) {
     try {
@@ -71,10 +69,8 @@ export function parseToolCall(text: string): { name: string; args: Record<string
     } catch {}
   }
 
-  // 2. Raw JSON anywhere in the response: {"name": "...", "args": {...}}
   const jsonMatch = /\{[\s\S]*"name"\s*:\s*"([^"]+)"[\s\S]*\}/.exec(text);
   if (jsonMatch) {
-    // Find the outermost JSON object
     const start = text.indexOf("{");
     let depth = 0;
     let end = -1;
@@ -96,9 +92,7 @@ export function parseToolCall(text: string): { name: string; args: Record<string
 }
 
 export function stripToolCall(text: string): string {
-  // Remove tagged blocks
   let out = text.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "");
-  // Remove raw JSON tool call objects
   const jsonMatch = /\{[\s\S]*"name"\s*:\s*"([^"]+)"[\s\S]*\}/.exec(out);
   if (jsonMatch && TOOL_NAMES.has(jsonMatch[1])) {
     const start = out.indexOf("{");
@@ -117,13 +111,14 @@ export class Agent {
   private client: OpenAI;
   private messages: Message[] = [];
   private cwd: string;
+  private model: string;
 
-  constructor(cwd: string) {
+  constructor(cwd: string, model?: string) {
     this.cwd = cwd;
+    this.model = model ?? MODEL;
     this.client = new OpenAI({
       apiKey: API_KEY || "local",
       baseURL: BASE_URL,
-      // OpenRouter needs attribution headers; local servers ignore them harmlessly
       defaultHeaders: isLocal ? {} : {
         "HTTP-Referer": "https://github.com/baberparweez/qwen-qode",
         "X-Title": "Qwen Qode",
@@ -144,12 +139,35 @@ export class Agent {
     this.messages[0] = { role: "system", content: this.buildSystemPrompt(cwd) };
   }
 
+  setModel(model: string) {
+    this.model = model;
+  }
+
+  getModel(): string {
+    return this.model;
+  }
+
   getCwd(): string {
     return this.cwd;
   }
 
-  async run(userMessage: string, onEvent: EventHandler): Promise<void> {
-    this.messages.push({ role: "user", content: userMessage });
+  // images: array of data URLs e.g. "data:image/png;base64,..."
+  async run(userMessage: string, onEvent: EventHandler, images?: string[]): Promise<void> {
+    // Build the user message — include images if provided and model supports vision
+    if (images && images.length > 0) {
+      this.messages.push({
+        role: "user",
+        content: [
+          { type: "text", text: userMessage },
+          ...images.map((url) => ({
+            type: "image_url" as const,
+            image_url: { url },
+          })),
+        ],
+      });
+    } else {
+      this.messages.push({ role: "user", content: userMessage });
+    }
 
     let iterations = 0;
 
@@ -159,7 +177,7 @@ export class Agent {
       let response: OpenAI.Chat.ChatCompletion;
       try {
         response = await this.client.chat.completions.create({
-          model: MODEL,
+          model: this.model,
           messages: this.messages,
           max_tokens: MAX_TOKENS,
           temperature: 0.1,
@@ -179,14 +197,12 @@ export class Agent {
       const toolCall = parseToolCall(rawText);
 
       if (!toolCall) {
-        // No tool call — this is the final answer
         const prose = stripToolCall(rawText);
         if (prose) onEvent({ type: "text", content: prose });
         this.messages.push({ role: "assistant", content: rawText });
         break;
       }
 
-      // Has a tool call — emit it, run it, inject result
       const prose = stripToolCall(rawText);
       if (prose) onEvent({ type: "text", content: prose });
 
@@ -194,7 +210,6 @@ export class Agent {
       const result = await executeTool(toolCall.name, toolCall.args, this.cwd);
       onEvent({ type: "tool_result", name: toolCall.name, success: result.success, output: result.output });
 
-      // Store assistant turn (with the tool_call tag) then inject result as a user message
       this.messages.push({ role: "assistant", content: rawText });
       this.messages.push({
         role: "user",
