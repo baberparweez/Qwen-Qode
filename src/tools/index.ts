@@ -5,6 +5,8 @@ import { editFileTool } from "./edit_file.js";
 import { listFilesTool } from "./list_files.js";
 import { bashTool } from "./bash.js";
 import { globSearchTool } from "./glob_search.js";
+import { webSearchTool } from "./web_search.js";
+import { ragSearchTool } from "./rag_search.js";
 import type { Tool, ToolResult } from "./types.js";
 
 export type { Tool, ToolResult };
@@ -16,6 +18,8 @@ const registry: Tool[] = [
   listFilesTool,
   bashTool,
   globSearchTool,
+  webSearchTool,
+  ragSearchTool,
 ];
 
 export const toolDefinitions: OpenAI.Chat.ChatCompletionTool[] = registry.map((t) => t.definition);

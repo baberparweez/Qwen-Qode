@@ -17,6 +17,8 @@ if (!process.env.OPENROUTER_API_KEY && !process.env.QQ_API_KEY && existsSync(hom
 export const BASE_URL =
   process.env.QQ_BASE_URL ?? "https://openrouter.ai/api/v1";
 
+export const TAVILY_API_KEY = process.env.TAVILY_API_KEY ?? "";
+
 export const API_KEY =
   process.env.QQ_API_KEY ?? process.env.OPENROUTER_API_KEY ?? "";
 

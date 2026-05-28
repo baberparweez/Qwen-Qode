@@ -12,7 +12,10 @@ Runs on [OpenRouter](https://openrouter.ai) (cloud, no GPU needed) or fully offl
 - **Collapsible tool calls** — see exactly which files were read or commands run
 - **Folder browser** — click through your filesystem to open any project
 - **Terminal CLI** — `qq` command for scripting and headless use
-- **6 built-in tools** — read, write, edit, list, bash, and search
+- **8 built-in tools** — read, write, edit, list, bash, search, web search, and semantic search
+- **Vision models** — attach screenshots or diagrams alongside your message
+- **RAG / semantic search** — index your codebase and search it by meaning, not just keywords
+- **Web search** — look up docs, changelogs, or Stack Overflow answers in real time (via Tavily)
 - **Cloud or local** — use OpenRouter with no setup, or run fully offline via Ollama / LM Studio
 - **ReAct agent loop** — iterative tool use until the task is complete (up to 30 rounds)
 
@@ -136,6 +139,8 @@ qq --web
 | `list_files` | Recursive directory listing, depth-limited, ignores build artifacts |
 | `bash` | Run a shell command in the project directory |
 | `glob_search` | Find files by name pattern or grep file contents by regex |
+| `web_search` | Search the web for docs, changelogs, or Stack Overflow answers (requires `TAVILY_API_KEY`) |
+| `semantic_search` | Natural-language search across the indexed codebase (requires clicking the ⊙ Index button first) |
 
 ---
 
@@ -200,6 +205,42 @@ QWEN_MODEL=qwen2.5-coder-32b-instruct
 
 ---
 
+## RAG — semantic search and web search
+
+Qwen Qode has two retrieval tools that let the agent go beyond the files it reads directly.
+
+### Semantic search (local embeddings)
+
+Click the **⊙ Index** button in the UI header to build a semantic index of your project. The agent can then use `semantic_search` to find relevant code by meaning — not just keyword matching.
+
+How it works:
+1. Files are chunked (50-line code chunks, paragraph-level for docs) and embedded locally using **`Xenova/all-MiniLM-L6-v2`** — a ~25 MB model that downloads once and runs on CPU.
+2. Chunks are stored in `{your-project}/.qq/index.json` (gitignore this).
+3. On re-index, only files that have changed since the last run are re-embedded (mtime-based incremental update).
+
+Indexing a typical project (~200 files) takes around 30–60 seconds on first run. After that, incremental updates are fast.
+
+Add `.qq/` to your project's `.gitignore`:
+
+```gitignore
+.qq/
+```
+
+### Web search (Tavily)
+
+`web_search` lets the agent look up current documentation, changelogs, or error messages at query time.
+
+1. Sign up at [tavily.com](https://tavily.com) — the free tier includes 1,000 searches/month.
+2. Add the key to `.env`:
+
+```env
+TAVILY_API_KEY=tvly-your-key-here
+```
+
+Without a Tavily key the tool gracefully returns an error message telling the agent web search is disabled — no other functionality is affected.
+
+---
+
 ## Project structure
 
 ```
@@ -210,13 +251,20 @@ qwen-qode/
 │   ├── server.ts       # HTTP server with SSE streaming (port 3579)
 │   ├── index.ts        # CLI entry point (qq command + --web flag)
 │   ├── ui.ts           # Terminal colour rendering
-│   └── tools/
-│       ├── read_file.ts
-│       ├── write_file.ts
-│       ├── edit_file.ts
-│       ├── list_files.ts
-│       ├── bash.ts
-│       └── glob_search.ts
+│   ├── tools/
+│   │   ├── read_file.ts
+│   │   ├── write_file.ts
+│   │   ├── edit_file.ts
+│   │   ├── list_files.ts
+│   │   ├── bash.ts
+│   │   ├── glob_search.ts
+│   │   ├── web_search.ts   # Tavily web search
+│   │   └── rag_search.ts   # semantic_search tool
+│   └── rag/
+│       ├── embedder.ts     # @xenova/transformers wrapper (all-MiniLM-L6-v2)
+│       ├── store.ts        # cosine-similarity vector store, JSON persistence
+│       ├── registry.ts     # singleton Store instances per project path
+│       └── indexer.ts      # file crawler + chunker + incremental updates
 └── web/                # Next.js browser UI
     └── app/
         ├── page.tsx
@@ -237,6 +285,7 @@ qwen-qode/
 | `QQ_BASE_URL` | `https://openrouter.ai/api/v1` | Override to point at a local server (Ollama, LM Studio) |
 | `QQ_API_KEY` | — | Generic key override. Not needed for local servers |
 | `QWEN_MODEL` | `qwen/qwen-2.5-coder-32b-instruct` | Model slug — format depends on your provider |
+| `TAVILY_API_KEY` | — | Optional. Enables `web_search`. Free tier at [tavily.com](https://tavily.com) |
 
 The agent loop works with any model that can follow structured output instructions — cloud or local.
 
@@ -265,10 +314,11 @@ QWEN_MODEL=qwen2.5-coder:14b
 Contributions are welcome. Some ideas for what to add:
 
 - **Streaming text** — stream tokens as they arrive rather than buffering the full response
-- **Image support** — pass screenshots to vision-capable models
 - **Multiple sessions** — sidebar with open project tabs
 - **File diff view** — show before/after when files are edited
 - **Custom system prompt** — per-project `.qqconfig` file
+- **Index on open** — auto-index when a session is created, with a progress indicator
+- **Re-rank RAG results** — use a cross-encoder for higher-quality retrieval
 
 Please open an issue before starting large changes.
 

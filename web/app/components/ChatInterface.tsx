@@ -1,6 +1,6 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Loader2, Trash2, X, Paperclip, AlertTriangle, ChevronDown } from "lucide-react";
+import { Send, Loader2, Trash2, X, Paperclip, AlertTriangle, ChevronDown, Database } from "lucide-react";
 import { MessageBubble } from "./MessageBubble";
 import type { ChatMessage, Session, AgentEvent, ToolCallPair, ModelOption } from "./types";
 
@@ -19,6 +19,8 @@ export function ChatInterface({ session, onClose }: Props) {
   const [models, setModels] = useState<ModelOption[]>([]);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const [indexing, setIndexing] = useState(false);
+  const [indexStatus, setIndexStatus] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -176,6 +178,26 @@ export function ChatInterface({ session, onClose }: Props) {
     setMessages([]);
   }
 
+  async function indexProject() {
+    if (indexing) return;
+    setIndexing(true);
+    setIndexStatus(null);
+    try {
+      const resp = await fetch(`${API}/api/sessions/${session.id}/index`, { method: "POST" });
+      if (resp.ok) {
+        const data = await resp.json() as { added: number; skipped: number; files: number };
+        setIndexStatus(`Indexed ${data.files} files (${data.added} chunks)`);
+      } else {
+        setIndexStatus("Indexing failed");
+      }
+    } catch {
+      setIndexStatus("Indexing failed");
+    } finally {
+      setIndexing(false);
+      setTimeout(() => setIndexStatus(null), 5000);
+    }
+  }
+
   const shortPath = session.projectPath.replace(/^\/Users\/[^/]+/, "~");
 
   return (
@@ -229,6 +251,22 @@ export function ChatInterface({ session, onClose }: Props) {
               </div>
             )}
           </div>
+        </div>
+
+        <div style={{ position: "relative" }}>
+          <button
+            onClick={indexProject}
+            disabled={indexing}
+            title="Index project for semantic search"
+            style={{ background: "transparent", border: "none", cursor: indexing ? "not-allowed" : "pointer", color: indexStatus ? "var(--accent)" : "var(--text-muted)", padding: 6, borderRadius: 6, display: "flex", alignItems: "center" }}
+          >
+            {indexing ? <Loader2 size={15} className="animate-spin" /> : <Database size={15} />}
+          </button>
+          {indexStatus && (
+            <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "6px 10px", whiteSpace: "nowrap", fontSize: 12, color: "var(--accent)", zIndex: 40, boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}>
+              {indexStatus}
+            </div>
+          )}
         </div>
 
         <button onClick={clearHistory} title="Clear history" style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 6, borderRadius: 6 }}>

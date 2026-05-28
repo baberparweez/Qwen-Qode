@@ -4,6 +4,8 @@ import { existsSync, statSync, readdirSync } from "fs";
 import { resolve, join } from "path";
 import { assertApiKey, MODEL, MODELS } from "./config.js";
 import { Agent, type AgentEvent } from "./agent.js";
+import { getStore } from "./rag/registry.js";
+import { indexProject } from "./rag/indexer.js";
 
 const PORT = 3579;
 const HOME = process.env.HOME ?? "/";
@@ -143,6 +145,32 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     }
     res.end();
     return;
+  }
+
+  // POST /api/sessions/:id/index — build/update semantic search index
+  if (req.method === "POST" && pathname?.match(/^\/api\/sessions\/[^/]+\/index$/)) {
+    const id = pathname.split("/")[3];
+    const agent = sessions.get(id);
+    if (!agent) return json(res, 404, { error: "Session not found" });
+
+    const cwd = agent.getCwd();
+    const store = getStore(cwd);
+
+    try {
+      const result = await indexProject(cwd, store);
+      return json(res, 200, result);
+    } catch (e) {
+      return json(res, 500, { error: String(e) });
+    }
+  }
+
+  // GET /api/sessions/:id/index — check index status
+  if (req.method === "GET" && pathname?.match(/^\/api\/sessions\/[^/]+\/index$/)) {
+    const id = pathname.split("/")[3];
+    const agent = sessions.get(id);
+    if (!agent) return json(res, 404, { error: "Session not found" });
+    const store = getStore(agent.getCwd());
+    return json(res, 200, { chunks: store.size(), files: store.getFiles().length });
   }
 
   // GET /api/info
