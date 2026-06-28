@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
-import { ChevronRight, Folder, FolderOpen, ArrowLeft, ArrowRight, Loader2, Home } from "lucide-react";
+import { ChevronRight, Folder, FolderOpen, ArrowLeft, ArrowRight, Loader2, Home, Clock, X } from "lucide-react";
+import { getRecentProjects, removeRecentProject } from "./recents";
 
 const API = "http://localhost:3579";
 
@@ -20,6 +21,9 @@ export function ProjectPicker({ onStart }: Props) {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
   const [serverDown, setServerDown] = useState(false);
+  const [recents, setRecents] = useState<string[]>([]);
+
+  useEffect(() => { setRecents(getRecentProjects()); }, []);
 
   async function browse(path?: string) {
     setLoading(true);
@@ -87,6 +91,60 @@ export function ProjectPicker({ onStart }: Props) {
           Qwen Qode — coding agent
         </div>
       </div>
+
+      {/* Recent projects */}
+      {!serverDown && recents.length > 0 && (
+        <div
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: 16,
+            width: "100%",
+            maxWidth: 520,
+            overflow: "hidden",
+          }}
+        >
+          <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10 }}>
+            <Clock size={14} color="var(--text-muted)" />
+            <span style={{ fontWeight: 600, fontSize: 13 }}>Recent projects</span>
+          </div>
+          <div style={{ maxHeight: 180, overflowY: "auto" }}>
+            {recents.map((p) => (
+              <div key={p} style={{ display: "flex", alignItems: "center", borderBottom: "1px solid var(--border)" }}>
+                <button
+                  onClick={() => handleSelect(p)}
+                  disabled={starting}
+                  style={{
+                    flex: 1, display: "flex", alignItems: "center", gap: 10, padding: "10px 16px",
+                    background: "transparent", border: "none", cursor: starting ? "default" : "pointer",
+                    color: "var(--text)", textAlign: "left", fontFamily: "monospace", fontSize: 12,
+                    overflow: "hidden",
+                  }}
+                  onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = "var(--surface-2)")}
+                  onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
+                >
+                  <FolderOpen size={14} color="var(--accent)" style={{ flexShrink: 0 }} />
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {shortPath(p)}
+                  </span>
+                </button>
+                <button
+                  onClick={() => { removeRecentProject(p); setRecents(getRecentProjects()); }}
+                  title="Remove from recents"
+                  style={{
+                    background: "transparent", border: "none", borderLeft: "1px solid var(--border)",
+                    padding: "10px 12px", cursor: "pointer", color: "var(--text-muted)", display: "flex",
+                  }}
+                  onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--red)")}
+                  onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--text-muted)")}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Browser card */}
       <div

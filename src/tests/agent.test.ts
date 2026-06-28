@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import { expect } from "./expect.js";
-import { parseToolCall, stripToolCall, safeStreamEnd } from "../agent.js";
+import { parseToolCall, stripToolCall, safeStreamEnd, Agent } from "../agent.js";
 
 describe("parseToolCall", () => {
   describe("tagged format <tool_call>...</tool_call>", () => {
@@ -144,5 +144,28 @@ describe("safeStreamEnd", () => {
   it("does not hold back a less-than used as comparison", () => {
     const text = `if a < b then return`;
     expect(safeStreamEnd(text, 0)).toBe(text.length);
+  });
+});
+
+describe("Agent system prompt", () => {
+  it("names the active model (friendly name)", () => {
+    const a = new Agent("/tmp", "z-ai/glm-5.2");
+    expect(a.getMessages()[0].content as string).toContain("GLM-5.2");
+  });
+
+  it("does not hardcode Qwen2.5-coder for a non-Qwen model", () => {
+    const a = new Agent("/tmp", "z-ai/glm-5.2");
+    expect(a.getMessages()[0].content as string).not.toContain("Qwen2.5-coder");
+  });
+
+  it("updates the model name in the prompt when switched", () => {
+    const a = new Agent("/tmp", "qwen/qwen-2.5-coder-32b-instruct");
+    a.setModel("z-ai/glm-5.2");
+    expect(a.getMessages()[0].content as string).toContain("GLM-5.2");
+  });
+
+  it("falls back to the raw id for an unknown model", () => {
+    const a = new Agent("/tmp", "some/custom-model");
+    expect(a.getMessages()[0].content as string).toContain("some/custom-model");
   });
 });

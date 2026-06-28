@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { ChatInterface } from "./components/ChatInterface";
+import { addRecentProject } from "./components/recents";
 import type { Session } from "./components/types";
 
 const API = "http://localhost:3579";
@@ -20,6 +21,7 @@ export default function Home() {
       throw new Error(err.error ?? `Server error ${res.status}`);
     }
     const data = await res.json();
+    addRecentProject(data.projectPath);
     setSession({ id: data.sessionId, projectPath: data.projectPath, model: data.model });
   }
 

@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { API_KEY, BASE_URL, MODEL, MAX_TOKENS, MAX_ITERATIONS } from "./config.js";
+import { API_KEY, BASE_URL, MODEL, MODELS, MAX_TOKENS, MAX_ITERATIONS } from "./config.js";
 
 const isLocal = BASE_URL.includes("localhost") || BASE_URL.includes("127.0.0.1");
 import { toolDefinitions, executeTool } from "./tools/index.js";
@@ -20,8 +20,14 @@ function buildToolDocs(): string {
     .join("\n\n");
 }
 
-const SYSTEM_PROMPT = `You are Qwen Qode, an expert software engineering assistant powered by Qwen2.5-coder.
+/** Friendly display name for a model id (falls back to the raw id). */
+function modelLabel(id: string): string {
+  return MODELS.find((m) => m.id === id)?.name ?? id;
+}
+
+const SYSTEM_PROMPT = `You are Qwen Qode, an expert software engineering assistant. You are running on the {MODEL} model.
 You help users understand, write, modify, and debug code in any programming language.
+If asked which model powers you, answer {MODEL}.
 
 ## Tools
 
@@ -196,6 +202,7 @@ export class Agent {
   private buildSystemPrompt(cwd: string): string {
     return SYSTEM_PROMPT
       .replace("{TOOL_DOCS}", buildToolDocs())
+      .replace(/\{MODEL\}/g, modelLabel(this.model))
       .replace("{CWD}", cwd);
   }
 
@@ -207,6 +214,8 @@ export class Agent {
 
   setModel(model: string) {
     this.model = model;
+    // Rebuild the system prompt so "running on {MODEL}" reflects the new model.
+    this.messages[0] = { role: "system", content: this.buildSystemPrompt(this.cwd) };
   }
 
   getModel(): string {
