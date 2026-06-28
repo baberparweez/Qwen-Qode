@@ -74,7 +74,7 @@ cp .env.example .env
 
 ```env
 OPENROUTER_API_KEY=sk-or-v1-your-key-here
-QWEN_MODEL=qwen/qwen-2.5-coder-32b-instruct
+QWEN_MODEL=qwen/qwen3-coder-30b-a3b-instruct
 ```
 
 Get a free API key at [openrouter.ai/keys](https://openrouter.ai/keys). Typical coding sessions cost less than $0.01.
@@ -290,7 +290,7 @@ qwen-qode/
 | `OPENROUTER_API_KEY` | — | Required for cloud mode. Get one at [openrouter.ai/keys](https://openrouter.ai/keys) |
 | `QQ_BASE_URL` | `https://openrouter.ai/api/v1` | Override to point at a local server (Ollama, LM Studio) |
 | `QQ_API_KEY` | — | Generic key override. Not needed for local servers |
-| `QWEN_MODEL` | `qwen/qwen-2.5-coder-32b-instruct` | Model slug — format depends on your provider |
+| `QWEN_MODEL` | `qwen/qwen3-coder-30b-a3b-instruct` | Model slug — format depends on your provider |
 | `TAVILY_API_KEY` | — | Optional. Enables `web_search`. Free tier at [tavily.com](https://tavily.com) |
 
 The agent loop works with any model that can follow structured output instructions — cloud or local.
@@ -302,11 +302,11 @@ The agent loop works with any model that can follow structured output instructio
 Because Qwen Qode uses plain-text tool calling rather than a provider-specific API feature, **any model works** — cloud or local. Just update `.env`:
 
 ```env
-# Smaller / faster Qwen via OpenRouter
-QWEN_MODEL=qwen/qwen-2.5-coder-7b-instruct
+# Flagship Qwen3 Coder via OpenRouter (higher quality)
+QWEN_MODEL=qwen/qwen3-coder
 
-# Different cloud model entirely
-QWEN_MODEL=google/gemini-flash-1.5
+# A different model entirely (any OpenRouter slug works)
+QWEN_MODEL=z-ai/glm-5.2
 
 # Local model via Ollama
 QQ_BASE_URL=http://localhost:11434/v1

@@ -23,7 +23,7 @@ export const API_KEY =
   process.env.QQ_API_KEY ?? process.env.OPENROUTER_API_KEY ?? "";
 
 export const MODEL =
-  process.env.QWEN_MODEL ?? "qwen/qwen-2.5-coder-32b-instruct";
+  process.env.QWEN_MODEL ?? "qwen/qwen3-coder-30b-a3b-instruct";
 
 export const MAX_TOKENS = 8192;
 export const MAX_ITERATIONS = 30;
@@ -40,10 +40,16 @@ export interface ModelOption {
 
 export const MODELS: ModelOption[] = [
   {
-    id: "qwen/qwen-2.5-coder-32b-instruct",
-    name: "Qwen2.5 Coder 32B",
+    id: "qwen/qwen3-coder-30b-a3b-instruct",
+    name: "Qwen3 Coder 30B",
     vision: false,
-    description: "Optimised for code — recommended for most tasks",
+    description: "Fast, low-cost coding model — recommended for most tasks",
+  },
+  {
+    id: "qwen/qwen3-coder",
+    name: "Qwen3 Coder 480B",
+    vision: false,
+    description: "Flagship coding model — highest quality, higher cost",
   },
   {
     id: "z-ai/glm-5.2",
@@ -52,18 +58,18 @@ export const MODELS: ModelOption[] = [
     description: "Reasoning model from Z.ai — strong all-round coding (its thinking is hidden in the UI)",
   },
   {
-    id: "qwen/qwen2.5-vl-72b-instruct",
-    name: "Qwen2.5 VL 72B",
+    id: "qwen/qwen3-vl-235b-a22b-instruct",
+    name: "Qwen3 VL 235B",
     vision: true,
-    description: "Vision + language — can analyse screenshots and diagrams",
-    warning: "This model supports images but is not specifically fine-tuned for coding. It may be less accurate on complex code tasks than the Coder model.",
+    description: "Vision + language — best for analysing screenshots and diagrams",
+    warning: "This model supports images but is not specifically fine-tuned for coding. It may be less accurate on complex code tasks than the Coder models.",
   },
   {
-    id: "qwen/qwen2.5-vl-7b-instruct",
-    name: "Qwen2.5 VL 7B",
+    id: "qwen/qwen3-vl-8b-instruct",
+    name: "Qwen3 VL 8B",
     vision: true,
     description: "Vision + language, faster and cheaper — good for quick image questions",
-    warning: "This model supports images but is not specifically fine-tuned for coding. It may be less accurate on complex code tasks than the Coder model.",
+    warning: "This model supports images but is not specifically fine-tuned for coding. It may be less accurate on complex code tasks than the Coder models.",
   },
 ];
 
