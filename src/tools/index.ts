@@ -5,6 +5,7 @@ import { editFileTool } from "./edit_file.js";
 import { listFilesTool } from "./list_files.js";
 import { bashTool } from "./bash.js";
 import { globSearchTool } from "./glob_search.js";
+import { gitTool } from "./git.js";
 import { webSearchTool } from "./web_search.js";
 import { ragSearchTool } from "./rag_search.js";
 import type { Tool, ToolResult } from "./types.js";
@@ -18,6 +19,7 @@ const registry: Tool[] = [
   listFilesTool,
   bashTool,
   globSearchTool,
+  gitTool,
   webSearchTool,
   ragSearchTool,
 ];

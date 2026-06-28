@@ -81,10 +81,42 @@ export function formatApiError(e: unknown): string {
   if (err.code === "ECONNREFUSED" || /ECONNREFUSED/.test(detail)) {
     return `Could not connect to ${BASE_URL}. Is your local model server (Ollama/LM Studio) running?`;
   }
+  // Statusless transient failures — usually a mid-stream drop from the provider.
+  if (/internal server error|econnreset|socket hang up|terminated|premature close|aborted|fetch failed/i.test(detail)) {
+    return `The model provider dropped the connection (${detail}). This is usually temporary — please send your message again.`;
+  }
   if (status) {
     return `API error (${status}): ${detail}`;
   }
   return `API error: ${detail}`;
+}
+
+const TAG_OPEN = "<tool_call>";
+const RAW_PREFIX = '{"name":';
+
+/**
+ * Largest index up to which `text` (starting at `from`) can be safely streamed
+ * as prose — i.e. it cannot be part of a tool-call marker. Holds back at the
+ * first `{` that could begin a raw JSON tool call (`{"name": …`) or the first
+ * `<` that could begin a `<tool_call>` tag, including partial markers that are
+ * still arriving across stream chunks. Plain `{`/`<` in prose or code pass
+ * through after one chunk of look-ahead.
+ */
+export function safeStreamEnd(text: string, from: number): number {
+  for (let pos = from; pos < text.length; pos++) {
+    const ch = text[pos];
+    if (ch === "<") {
+      const sub = text.slice(pos, pos + TAG_OPEN.length);
+      if (sub === TAG_OPEN) return pos;          // confirmed tag
+      if (TAG_OPEN.startsWith(sub)) return pos;  // partial tag at buffer end — hold
+    } else if (ch === "{") {
+      // Compare a small whitespace-stripped window against `{"name":`.
+      const compact = text.slice(pos, pos + 32).replace(/\s+/g, "");
+      if (/^\{"name":/.test(compact)) return pos;       // confirmed raw tool call
+      if (RAW_PREFIX.startsWith(compact)) return pos;    // partial — hold
+    }
+  }
+  return text.length;
 }
 
 const TOOL_NAMES = new Set(toolDefinitions.map((t) => t.function.name));
@@ -209,47 +241,46 @@ export class Agent {
 
       let rawText = "";
       let emittedUpTo = 0;   // index in rawText up to which we've emitted text events
-      let toolCallAt = -1;   // index where tool call content begins (-1 = not yet detected)
 
-      try {
-        const stream = await this.client.chat.completions.create({
-          model: this.model,
-          messages: this.messages,
-          max_tokens: MAX_TOKENS,
-          temperature: 0.1,
-          stream: true,
-        });
+      // Stream the model response. Retry the request only while no text has been
+      // shown to the user yet (a clean connection-time failure) — retrying after
+      // partial output would duplicate text in the UI.
+      const MAX_ATTEMPTS = 3;
+      let streamed = false;
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS && !streamed; attempt++) {
+        rawText = "";
+        emittedUpTo = 0;
+        try {
+          const stream = await this.client.chat.completions.create({
+            model: this.model,
+            messages: this.messages,
+            max_tokens: MAX_TOKENS,
+            temperature: 0.1,
+            stream: true,
+          });
 
-        for await (const chunk of stream) {
-          const delta = chunk.choices[0]?.delta?.content ?? "";
-          if (!delta) continue;
+          for await (const chunk of stream) {
+            const delta = chunk.choices[0]?.delta?.content ?? "";
+            if (!delta) continue;
+            rawText += delta;
 
-          rawText += delta;
-
-          // Locate the earliest point where tool-call content starts.
-          // We only need to find this once — once found we stop emitting.
-          if (toolCallAt === -1) {
-            const trimmed = rawText.trimStart();
-            // Response begins with raw JSON or tagged block
-            if (trimmed.startsWith("{") || trimmed.startsWith("<tool_call>")) {
-              toolCallAt = rawText.length - trimmed.length;
-            } else {
-              // Tool call appears mid-response (prose first, then call)
-              const tagIdx = rawText.indexOf("<tool_call>");
-              if (tagIdx !== -1) toolCallAt = tagIdx;
+            // Emit prose up to the next possible tool-call marker (raw JSON or tag).
+            const safeEnd = safeStreamEnd(rawText, emittedUpTo);
+            if (safeEnd > emittedUpTo) {
+              onEvent({ type: "text", content: rawText.slice(emittedUpTo, safeEnd) });
+              emittedUpTo = safeEnd;
             }
           }
-
-          // Emit safe prose up to (but not including) the tool call
-          const safeEnd = toolCallAt !== -1 ? toolCallAt : rawText.length;
-          if (safeEnd > emittedUpTo) {
-            onEvent({ type: "text", content: rawText.slice(emittedUpTo, safeEnd) });
-            emittedUpTo = safeEnd;
+          streamed = true;
+        } catch (e: unknown) {
+          // Safe to retry only if nothing was shown to the user this attempt.
+          if (emittedUpTo === 0 && attempt < MAX_ATTEMPTS) {
+            await new Promise((r) => setTimeout(r, 500 * attempt));
+            continue;
           }
+          onEvent({ type: "error", message: formatApiError(e) });
+          return;
         }
-      } catch (e: unknown) {
-        onEvent({ type: "error", message: formatApiError(e) });
-        return;
       }
 
       const toolCall = parseToolCall(rawText);

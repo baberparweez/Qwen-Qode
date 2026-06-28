@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import { expect } from "./expect.js";
-import { parseToolCall, stripToolCall } from "../agent.js";
+import { parseToolCall, stripToolCall, safeStreamEnd } from "../agent.js";
 
 describe("parseToolCall", () => {
   describe("tagged format <tool_call>...</tool_call>", () => {
@@ -59,7 +59,7 @@ describe("parseToolCall", () => {
   });
 
   describe("all tool names are recognised", () => {
-    const tools = ["read_file", "write_file", "edit_file", "list_files", "bash", "glob_search"];
+    const tools = ["read_file", "write_file", "edit_file", "list_files", "bash", "glob_search", "git", "web_search", "semantic_search"];
     for (const name of tools) {
       it(`recognises ${name}`, () => {
         const text = `{"name": "${name}", "args": {}}`;
@@ -97,5 +97,52 @@ describe("stripToolCall", () => {
   it("trims leading and trailing whitespace from the result", () => {
     const text = `<tool_call>{"name": "bash", "args": {"command": "ls"}}</tool_call>`;
     expect(stripToolCall(text)).toBe("");
+  });
+});
+
+describe("safeStreamEnd", () => {
+  it("emits all of plain prose with no markers", () => {
+    const text = "Here is a plain explanation with no tool calls.";
+    expect(safeStreamEnd(text, 0)).toBe(text.length);
+  });
+
+  it("stops at a raw JSON tool call that follows prose (the leak bug)", () => {
+    const text = `Sure, let's list the files.\n\n{"name": "list_files", "args": {"path": "."}}`;
+    expect(safeStreamEnd(text, 0)).toBe(text.indexOf("{"));
+  });
+
+  it("stops at index 0 when the response is only a raw tool call", () => {
+    const text = `{"name": "read_file", "args": {"path": "a.ts"}}`;
+    expect(safeStreamEnd(text, 0)).toBe(0);
+  });
+
+  it("stops at a <tool_call> tag that follows prose", () => {
+    const text = `Let me read it.\n<tool_call>{"name": "read_file"}</tool_call>`;
+    expect(safeStreamEnd(text, 0)).toBe(text.indexOf("<"));
+  });
+
+  it("handles whitespace between { and \"name\"", () => {
+    const text = `Doing it now {  "name": "bash", "args": {}}`;
+    expect(safeStreamEnd(text, 0)).toBe(text.indexOf("{"));
+  });
+
+  it("holds back a partial raw prefix arriving at the buffer end", () => {
+    const text = `working on it {"na`;
+    expect(safeStreamEnd(text, 0)).toBe(text.indexOf("{"));
+  });
+
+  it("holds back a partial tag arriving at the buffer end", () => {
+    const text = `one moment <tool`;
+    expect(safeStreamEnd(text, 0)).toBe(text.indexOf("<"));
+  });
+
+  it("does not hold back a plain brace in prose or code", () => {
+    const text = `the object { foo: 1 } is fine`;
+    expect(safeStreamEnd(text, 0)).toBe(text.length);
+  });
+
+  it("does not hold back a less-than used as comparison", () => {
+    const text = `if a < b then return`;
+    expect(safeStreamEnd(text, 0)).toBe(text.length);
   });
 });

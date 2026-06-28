@@ -8,11 +8,13 @@ Runs on [OpenRouter](https://openrouter.ai) (cloud, no GPU needed) or fully offl
 
 ## Features
 
-- **Browser UI** — dark-themed chat interface with streaming responses
+- **Browser UI** — dark-themed chat interface with token-by-token streaming responses
+- **Syntax highlighting** — fenced code blocks are highlighted (zero-dependency, themed for the dark UI)
 - **Collapsible tool calls** — see exactly which files were read or commands run
 - **Folder browser** — click through your filesystem to open any project
 - **Terminal CLI** — `qq` command for scripting and headless use
-- **8 built-in tools** — read, write, edit, list, bash, search, web search, and semantic search
+- **9 built-in tools** — read, write, edit, list, bash, search, git, web search, and semantic search
+- **Git-aware** — the agent can check status, review diffs, read history, stage, and commit
 - **Vision models** — attach screenshots or diagrams alongside your message
 - **RAG / semantic search** — index your codebase and search it by meaning, not just keywords
 - **Web search** — look up docs, changelogs, or Stack Overflow answers in real time (via Tavily)
@@ -139,6 +141,7 @@ qq --web
 | `list_files` | Recursive directory listing, depth-limited, ignores build artifacts |
 | `bash` | Run a shell command in the project directory |
 | `glob_search` | Find files by name pattern or grep file contents by regex |
+| `git` | Safe git operations: `status`, `diff`, `log`, `branch`, `show`, `add`, `commit` (no push/reset/force) |
 | `web_search` | Search the web for docs, changelogs, or Stack Overflow answers (requires `TAVILY_API_KEY`) |
 | `semantic_search` | Natural-language search across the indexed codebase (requires clicking the ⊙ Index button first) |
 
@@ -209,16 +212,17 @@ QWEN_MODEL=qwen2.5-coder-32b-instruct
 
 Qwen Qode has two retrieval tools that let the agent go beyond the files it reads directly.
 
-### Semantic search (local embeddings)
+### Codebase search (BM25)
 
-Click the **⊙ Index** button in the UI header to build a semantic index of your project. The agent can then use `semantic_search` to find relevant code by meaning — not just keyword matching.
+Click the **⊙ Index** button in the UI header to build a search index of your project. The agent can then use `semantic_search` to find relevant code by keyword and concept.
 
 How it works:
-1. Files are chunked (50-line code chunks, paragraph-level for docs) and embedded locally using **`Xenova/all-MiniLM-L6-v2`** — a ~25 MB model that downloads once and runs on CPU.
-2. Chunks are stored in `{your-project}/.qq/index.json` (gitignore this).
-3. On re-index, only files that have changed since the last run are re-embedded (mtime-based incremental update).
+1. Files are chunked (50-line code chunks, paragraph-level for docs) and tokenized with a code-aware tokenizer that splits `camelCase`, `snake_case`, and `kebab-case` so symbol names match naturally.
+2. Chunks are ranked with **BM25** — the same algorithm behind Elasticsearch and GitHub code search. It's pure JavaScript: no model download, no GPU, instant queries, and it nails exact symbol names.
+3. The index is stored in `{your-project}/.qq/index.json` (gitignore this).
+4. On re-index, only files that have changed since the last run are re-processed (mtime-based incremental update).
 
-Indexing a typical project (~200 files) takes around 30–60 seconds on first run. After that, incremental updates are fast.
+Indexing is fast — a typical project (~200 files) takes a couple of seconds, even on first run (there's no model to download).
 
 Add `.qq/` to your project's `.gitignore`:
 
@@ -258,11 +262,12 @@ qwen-qode/
 │   │   ├── list_files.ts
 │   │   ├── bash.ts
 │   │   ├── glob_search.ts
+│   │   ├── git.ts          # safe git operations
 │   │   ├── web_search.ts   # Tavily web search
 │   │   └── rag_search.ts   # semantic_search tool
 │   └── rag/
-│       ├── embedder.ts     # @xenova/transformers wrapper (all-MiniLM-L6-v2)
-│       ├── store.ts        # cosine-similarity vector store, JSON persistence
+│       ├── tokenizer.ts    # code-aware tokenizer (camelCase/snake_case split)
+│       ├── store.ts        # BM25 ranked index, JSON persistence
 │       ├── registry.ts     # singleton Store instances per project path
 │       └── indexer.ts      # file crawler + chunker + incremental updates
 └── web/                # Next.js browser UI
@@ -272,6 +277,7 @@ qwen-qode/
             ├── ProjectPicker.tsx   # Clickable folder browser
             ├── ChatInterface.tsx   # Streaming chat with tool call display
             ├── MessageBubble.tsx   # Message renderer (markdown-lite)
+            ├── highlight.tsx       # Zero-dependency syntax highlighter
             └── ToolCallBlock.tsx   # Collapsible tool call/result blocks
 ```
 
@@ -313,7 +319,6 @@ QWEN_MODEL=qwen2.5-coder:14b
 
 Contributions are welcome. Some ideas for what to add:
 
-- **Streaming text** — stream tokens as they arrive rather than buffering the full response
 - **Multiple sessions** — sidebar with open project tabs
 - **File diff view** — show before/after when files are edited
 - **Custom system prompt** — per-project `.qqconfig` file

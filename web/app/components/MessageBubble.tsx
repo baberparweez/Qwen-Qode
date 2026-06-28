@@ -1,5 +1,6 @@
 "use client";
 import { ToolCallBlock } from "./ToolCallBlock";
+import { highlightCode } from "./highlight";
 import type { ChatMessage } from "./types";
 
 function renderText(text: string) {
@@ -28,7 +29,7 @@ function renderText(text: string) {
               {lang}
             </span>
           )}
-          <code style={{ color: "var(--accent)" }}>{code}</code>
+          <code style={{ color: "var(--text)" }}>{highlightCode(code, lang)}</code>
         </pre>
       );
     }
