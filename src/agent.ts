@@ -55,6 +55,38 @@ export type AgentEvent =
 
 export type EventHandler = (event: AgentEvent) => void;
 
+/** Turn an OpenAI SDK error into a clear, actionable message. */
+export function formatApiError(e: unknown): string {
+  const err = e as {
+    status?: number;
+    code?: string;
+    error?: { message?: string };
+    message?: string;
+  };
+  const status = err.status;
+  const detail = err.error?.message || err.message || String(e);
+
+  if (status === 401 || status === 403) {
+    return `Authentication failed (${status}). Check OPENROUTER_API_KEY in your .env.`;
+  }
+  if (status === 402) {
+    return `Insufficient credits (402). Top up your OpenRouter account or switch to a free/local model.`;
+  }
+  if (status === 429) {
+    return `Rate limited (429): ${detail}. Wait a few seconds and try again.`;
+  }
+  if (status && status >= 500) {
+    return `Model provider error (${status}): ${detail}. This is usually a temporary upstream issue — please try again.`;
+  }
+  if (err.code === "ECONNREFUSED" || /ECONNREFUSED/.test(detail)) {
+    return `Could not connect to ${BASE_URL}. Is your local model server (Ollama/LM Studio) running?`;
+  }
+  if (status) {
+    return `API error (${status}): ${detail}`;
+  }
+  return `API error: ${detail}`;
+}
+
 const TOOL_NAMES = new Set(toolDefinitions.map((t) => t.function.name));
 const TOOL_CALL_RE = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/;
 
@@ -119,6 +151,8 @@ export class Agent {
     this.client = new OpenAI({
       apiKey: API_KEY || "local",
       baseURL: BASE_URL,
+      maxRetries: 4,        // retry transient 408/409/429/5xx (default is 2)
+      timeout: 120_000,     // 2 min — long codegen responses can be slow
       defaultHeaders: isLocal ? {} : {
         "HTTP-Referer": "https://github.com/baberparweez/qwen-qode",
         "X-Title": "Qwen Qode",
@@ -153,7 +187,6 @@ export class Agent {
 
   // images: array of data URLs e.g. "data:image/png;base64,..."
   async run(userMessage: string, onEvent: EventHandler, images?: string[]): Promise<void> {
-    // Build the user message — include images if provided and model supports vision
     if (images && images.length > 0) {
       this.messages.push({
         role: "user",
@@ -174,37 +207,65 @@ export class Agent {
     while (iterations < MAX_ITERATIONS) {
       iterations++;
 
-      let response: OpenAI.Chat.ChatCompletion;
+      let rawText = "";
+      let emittedUpTo = 0;   // index in rawText up to which we've emitted text events
+      let toolCallAt = -1;   // index where tool call content begins (-1 = not yet detected)
+
       try {
-        response = await this.client.chat.completions.create({
+        const stream = await this.client.chat.completions.create({
           model: this.model,
           messages: this.messages,
           max_tokens: MAX_TOKENS,
           temperature: 0.1,
+          stream: true,
         });
+
+        for await (const chunk of stream) {
+          const delta = chunk.choices[0]?.delta?.content ?? "";
+          if (!delta) continue;
+
+          rawText += delta;
+
+          // Locate the earliest point where tool-call content starts.
+          // We only need to find this once — once found we stop emitting.
+          if (toolCallAt === -1) {
+            const trimmed = rawText.trimStart();
+            // Response begins with raw JSON or tagged block
+            if (trimmed.startsWith("{") || trimmed.startsWith("<tool_call>")) {
+              toolCallAt = rawText.length - trimmed.length;
+            } else {
+              // Tool call appears mid-response (prose first, then call)
+              const tagIdx = rawText.indexOf("<tool_call>");
+              if (tagIdx !== -1) toolCallAt = tagIdx;
+            }
+          }
+
+          // Emit safe prose up to (but not including) the tool call
+          const safeEnd = toolCallAt !== -1 ? toolCallAt : rawText.length;
+          if (safeEnd > emittedUpTo) {
+            onEvent({ type: "text", content: rawText.slice(emittedUpTo, safeEnd) });
+            emittedUpTo = safeEnd;
+          }
+        }
       } catch (e: unknown) {
-        onEvent({ type: "error", message: `API error: ${String(e)}` });
+        onEvent({ type: "error", message: formatApiError(e) });
         return;
       }
 
-      const choice = response.choices[0];
-      if (!choice) {
-        onEvent({ type: "error", message: "No response from model" });
-        return;
-      }
-
-      const rawText = choice.message.content ?? "";
       const toolCall = parseToolCall(rawText);
 
       if (!toolCall) {
-        const prose = stripToolCall(rawText);
-        if (prose) onEvent({ type: "text", content: prose });
+        // No tool call — emit whatever text wasn't streamed yet (e.g. trailing whitespace)
+        const remaining = rawText.slice(emittedUpTo).trim();
+        if (remaining) onEvent({ type: "text", content: remaining });
         this.messages.push({ role: "assistant", content: rawText });
         break;
       }
 
+      // Tool call found. Any prose before it was already streamed token-by-token.
+      // If nothing was emitted yet (edge case), emit the stripped prose now.
       const prose = stripToolCall(rawText);
-      if (prose) onEvent({ type: "text", content: prose });
+      if (prose && emittedUpTo === 0) onEvent({ type: "text", content: prose });
 
       onEvent({ type: "tool_call", name: toolCall.name, args: toolCall.args });
       const result = await executeTool(toolCall.name, toolCall.args, this.cwd);

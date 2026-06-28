@@ -1,5 +1,3 @@
-@import "tailwindcss";
-
 :root {
   --bg: #0d0d0d;
   --surface: #161616;
@@ -35,3 +33,12 @@ pre, code, .mono {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}

@@ -157,7 +157,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     const store = getStore(cwd);
 
     try {
-      const result = await indexProject(cwd, store);
+      const result = indexProject(cwd, store);
       return json(res, 200, result);
     } catch (e) {
       return json(res, 500, { error: String(e) });

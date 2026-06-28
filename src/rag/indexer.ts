@@ -1,6 +1,6 @@
 import { readdirSync, statSync, readFileSync } from "fs";
 import { join, relative, extname } from "path";
-import { embed } from "./embedder.js";
+import { tokenize } from "./tokenizer.js";
 import { Store, type Chunk } from "./store.js";
 
 // ─── File type sets ───────────────────────────────────────────────────────────
@@ -19,62 +19,47 @@ const CODE_EXTS = new Set([
   ".css", ".scss", ".sass", ".less",
   ".html", ".xml", ".vue", ".svelte",
   ".json", ".yaml", ".yml", ".toml",
-  ".graphql", ".gql", ".prisma",
-  ".sql",
+  ".graphql", ".gql", ".prisma", ".sql",
 ]);
 
 const DOC_EXTS = new Set([".md", ".mdx", ".txt", ".rst"]);
 
-const MAX_FILE_BYTES = 500_000; // skip files > 500 KB
-
-// ─── Chunking ─────────────────────────────────────────────────────────────────
-
+const MAX_FILE_BYTES = 500_000;
 const CODE_CHUNK_LINES = 50;
 const CODE_OVERLAP_LINES = 10;
 
-function chunkCode(
-  content: string,
-  relPath: string,
-  mtime: number,
-): Omit<Chunk, "embedding">[] {
-  const lines = content.split("\n");
-  const chunks: Omit<Chunk, "embedding">[] = [];
-  let i = 0;
+// ─── Chunking ─────────────────────────────────────────────────────────────────
 
+function makeChunk(
+  id: string,
+  file: string,
+  text: string,
+  mtime: number,
+): Chunk {
+  return { id, file, text, tokens: tokenize(text), mtime };
+}
+
+function chunkCode(content: string, relPath: string, mtime: number): Chunk[] {
+  const lines = content.split("\n");
+  const chunks: Chunk[] = [];
+  let i = 0;
   while (i < lines.length) {
     const end = Math.min(i + CODE_CHUNK_LINES, lines.length);
     const text = lines.slice(i, end).join("\n").trim();
     if (text.length > 30) {
-      chunks.push({
-        id: `${relPath}:${i}-${end}`,
-        file: relPath,
-        // Prefix the file path so the model sees context about where this is from
-        text: `// ${relPath}\n${text}`,
-        mtime,
-      });
+      chunks.push(makeChunk(`${relPath}:${i}-${end}`, relPath, `// ${relPath}\n${text}`, mtime));
     }
     i += CODE_CHUNK_LINES - CODE_OVERLAP_LINES;
   }
-
   return chunks;
 }
 
-function chunkDocs(
-  content: string,
-  relPath: string,
-  mtime: number,
-): Omit<Chunk, "embedding">[] {
-  const paragraphs = content
+function chunkDocs(content: string, relPath: string, mtime: number): Chunk[] {
+  return content
     .split(/\n\n+/)
     .map((p) => p.trim())
-    .filter((p) => p.length > 40);
-
-  return paragraphs.map((text, i) => ({
-    id: `${relPath}:p${i}`,
-    file: relPath,
-    text,
-    mtime,
-  }));
+    .filter((p) => p.length > 40)
+    .map((text, i) => makeChunk(`${relPath}:p${i}`, relPath, text, mtime));
 }
 
 // ─── File collection ──────────────────────────────────────────────────────────
@@ -82,31 +67,20 @@ function chunkDocs(
 function collectFiles(dir: string): string[] {
   const results: string[] = [];
   let entries: string[];
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return results;
-  }
+  try { entries = readdirSync(dir); } catch { return results; }
 
   for (const entry of entries) {
     if (IGNORED_DIRS.has(entry) || entry.startsWith(".")) continue;
     const full = join(dir, entry);
     let stat;
-    try {
-      stat = statSync(full);
-    } catch {
-      continue;
-    }
+    try { stat = statSync(full); } catch { continue; }
     if (stat.isDirectory()) {
       results.push(...collectFiles(full));
     } else if (stat.isFile()) {
       const ext = extname(full).toLowerCase();
-      if (CODE_EXTS.has(ext) || DOC_EXTS.has(ext)) {
-        results.push(full);
-      }
+      if (CODE_EXTS.has(ext) || DOC_EXTS.has(ext)) results.push(full);
     }
   }
-
   return results;
 }
 
@@ -124,11 +98,11 @@ export interface IndexResult {
   files: number;
 }
 
-export async function indexProject(
+export function indexProject(
   projectPath: string,
   store: Store,
   onProgress?: (p: IndexProgress) => void,
-): Promise<IndexResult> {
+): IndexResult {
   const files = collectFiles(projectPath);
   let added = 0;
   let skipped = 0;
@@ -141,57 +115,29 @@ export async function indexProject(
     onProgress?.({ total: files.length, done: i, current: relPath });
 
     let stat;
-    try {
-      stat = statSync(absPath);
-    } catch {
-      continue;
-    }
+    try { stat = statSync(absPath); } catch { continue; }
 
     const mtime = stat.mtimeMs;
     const storedMtime = store.getFileMtime(relPath);
-
-    // Skip unchanged files (mtime-based incremental)
-    if (storedMtime !== null && storedMtime >= mtime) {
-      skipped++;
-      continue;
-    }
-
-    if (stat.size > MAX_FILE_BYTES) {
-      skipped++;
-      continue;
-    }
+    if (storedMtime !== null && storedMtime >= mtime) { skipped++; continue; }
+    if (stat.size > MAX_FILE_BYTES) { skipped++; continue; }
 
     let content: string;
-    try {
-      content = readFileSync(absPath, "utf-8");
-    } catch {
-      continue;
-    }
+    try { content = readFileSync(absPath, "utf-8"); } catch { continue; }
 
     const ext = extname(absPath).toLowerCase();
-    const rawChunks = DOC_EXTS.has(ext)
+    const chunks = DOC_EXTS.has(ext)
       ? chunkDocs(content, relPath, mtime)
       : chunkCode(content, relPath, mtime);
 
-    const embedded: Chunk[] = [];
-    for (const raw of rawChunks) {
-      try {
-        const embedding = await embed(raw.text);
-        embedded.push({ ...raw, embedding });
-      } catch {
-        // skip chunk on embed error
-      }
-    }
-
-    if (embedded.length > 0) {
-      store.upsert(relPath, embedded);
-      added += embedded.length;
+    if (chunks.length > 0) {
+      store.upsert(relPath, chunks);
+      added += chunks.length;
       filesIndexed++;
     }
   }
 
   onProgress?.({ total: files.length, done: files.length, current: "" });
   store.save();
-
   return { added, skipped, files: filesIndexed };
 }

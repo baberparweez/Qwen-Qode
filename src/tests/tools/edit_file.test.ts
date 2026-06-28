@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, beforeEach, afterEach } from "node:test";
+import { expect } from "../expect.js";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
