@@ -46,6 +46,12 @@ export const MODELS: ModelOption[] = [
     description: "Optimised for code — recommended for most tasks",
   },
   {
+    id: "z-ai/glm-5.2",
+    name: "GLM-5.2",
+    vision: false,
+    description: "Reasoning model from Z.ai — strong all-round coding (its thinking is hidden in the UI)",
+  },
+  {
     id: "qwen/qwen2.5-vl-72b-instruct",
     name: "Qwen2.5 VL 72B",
     vision: true,

@@ -21,6 +21,7 @@ export function ChatInterface({ session, onClose }: Props) {
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [indexing, setIndexing] = useState(false);
   const [indexStatus, setIndexStatus] = useState<string | null>(null);
+  const [showIndexHelp, setShowIndexHelp] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -253,11 +254,15 @@ export function ChatInterface({ session, onClose }: Props) {
           </div>
         </div>
 
-        <div style={{ position: "relative" }}>
+        <div
+          style={{ position: "relative" }}
+          onMouseEnter={() => setShowIndexHelp(true)}
+          onMouseLeave={() => setShowIndexHelp(false)}
+        >
           <button
             onClick={indexProject}
             disabled={indexing}
-            title="Index project for semantic search"
+            aria-label="Index project for code search"
             style={{ background: "transparent", border: "none", cursor: indexing ? "not-allowed" : "pointer", color: indexStatus ? "var(--accent)" : "var(--text-muted)", padding: 6, borderRadius: 6, display: "flex", alignItems: "center" }}
           >
             {indexing ? <Loader2 size={15} className="animate-spin" /> : <Database size={15} />}
@@ -265,6 +270,14 @@ export function ChatInterface({ session, onClose }: Props) {
           {indexStatus && (
             <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "6px 10px", whiteSpace: "nowrap", fontSize: 12, color: "var(--accent)", zIndex: 40, boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}>
               {indexStatus}
+            </div>
+          )}
+          {showIndexHelp && !indexStatus && (
+            <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 260, background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", fontSize: 12, lineHeight: 1.5, color: "var(--text-muted)", zIndex: 40, boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
+              <div style={{ color: "var(--text)", fontWeight: 600, marginBottom: 4 }}>
+                {indexing ? "Indexing…" : "Index project for code search"}
+              </div>
+              Builds a searchable index of this project so the agent can find relevant code by keyword and concept — without reading every file. Saved to <code style={{ color: "var(--accent)" }}>.qq/index.json</code>. Re-run after big changes.
             </div>
           )}
         </div>
