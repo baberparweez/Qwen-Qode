@@ -28,6 +28,12 @@ export const MODEL =
 export const MAX_TOKENS = 16384;
 export const MAX_ITERATIONS = 50;
 
+// Rough character budget for the conversation sent to the model. Oldest
+// non-system messages are dropped past this so long sessions don't overflow
+// the context window. ~120k chars ≈ 30k tokens — safe for a 32k-context model;
+// raise it (QQ_MAX_CONTEXT_CHARS) for larger-context models.
+export const MAX_CONTEXT_CHARS = Number(process.env.QQ_MAX_CONTEXT_CHARS) || 120_000;
+
 const isLocal = BASE_URL.includes("localhost") || BASE_URL.includes("127.0.0.1");
 
 export interface ModelOption {

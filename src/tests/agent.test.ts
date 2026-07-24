@@ -259,3 +259,22 @@ describe("Agent.run robustness", () => {
     expect(errors.length).toBe(1);
   });
 });
+
+describe("Agent context bounding", () => {
+  it("drops oldest non-system messages but keeps the system prompt and recent ones", () => {
+    const agent = new Agent("/tmp", "qwen/qwen3-coder-30b-a3b-instruct");
+    const internal = agent as unknown as {
+      messages: Array<{ role: string; content: string }>;
+      pruneHistory(): void;
+    };
+    const big = "x".repeat(50_000);
+    for (let i = 0; i < 20; i++) {
+      internal.messages.push({ role: i % 2 ? "assistant" : "user", content: big });
+    }
+    const before = internal.messages.length;
+    internal.pruneHistory();
+    expect(internal.messages.length < before).toBe(true);
+    expect(internal.messages[0].role).toBe("system"); // system prompt never dropped
+    expect(internal.messages.length >= 5).toBe(true);  // keeps system + recent
+  });
+});

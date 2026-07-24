@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { expect } from "../expect.js";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { globSearchTool } from "../../tools/glob_search.js";
@@ -60,5 +60,32 @@ describe("glob_search", () => {
     expect(result.success).toBe(true);
     expect(result.output).toContain("index.ts");
     expect(result.output).not.toContain("README.md");
+  });
+
+  it("glob ignores node_modules", async () => {
+    mkdirSync(join(tmp, "node_modules"));
+    writeFileSync(join(tmp, "node_modules", "dep.ts"), "x");
+    const result = await globSearchTool.execute({ pattern: "*.ts", search_type: "glob" }, tmp);
+    expect(result.output).not.toContain("node_modules");
+  });
+});
+
+describe("glob_search — injection safety", () => {
+  it("does NOT execute shell metacharacters in a grep pattern", async () => {
+    const sentinel = join(tmp, "PWNED");
+    await globSearchTool.execute(
+      { pattern: `x"; touch "${sentinel}`, search_type: "grep" },
+      tmp
+    );
+    expect(existsSync(sentinel)).toBe(false);
+  });
+
+  it("does NOT execute a command substitution in a grep pattern", async () => {
+    const sentinel = join(tmp, "PWNED2");
+    await globSearchTool.execute(
+      { pattern: `$(touch ${sentinel})`, search_type: "grep" },
+      tmp
+    );
+    expect(existsSync(sentinel)).toBe(false);
   });
 });

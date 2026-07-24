@@ -34,10 +34,21 @@ function cors(res: http.ServerResponse) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
+const MAX_BODY_BYTES = 30 * 1024 * 1024; // 30 MB — generous for pasted images, guards against OOM
+
 function readBody(req: http.IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let data = "";
-    req.on("data", (chunk) => (data += chunk));
+    let size = 0;
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        reject(new Error("Request body too large (max 30 MB)"));
+        req.destroy();
+        return;
+      }
+      data += chunk;
+    });
     req.on("end", () => {
       try { resolve(data ? JSON.parse(data) : {}); }
       catch { reject(new Error("Invalid JSON")); }
@@ -55,6 +66,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
   const parsed = parseUrl(req.url ?? "/", true);
   const pathname = parsed.pathname ?? "/";
 
+  try {
   // GET /api/models — list available models
   if (req.method === "GET" && pathname === "/api/models") {
     return json(res, 200, MODELS);
@@ -178,7 +190,13 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     return json(res, 200, { model: MODEL, sessions: sessions.size });
   }
 
-  json(res, 404, { error: "Not found" });
+    json(res, 404, { error: "Not found" });
+  } catch (e) {
+    // readBody rejections (invalid JSON / body too large) and any handler throw land here.
+    const msg = (e as Error)?.message ?? String(e);
+    if (!res.headersSent) json(res, 400, { error: msg });
+    else res.end();
+  }
 }
 
 export async function startServer() {

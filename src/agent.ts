@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { API_KEY, BASE_URL, MODEL, MODELS, MAX_TOKENS, MAX_ITERATIONS } from "./config.js";
+import { API_KEY, BASE_URL, MODEL, MODELS, MAX_TOKENS, MAX_ITERATIONS, MAX_CONTEXT_CHARS } from "./config.js";
 
 const isLocal = BASE_URL.includes("localhost") || BASE_URL.includes("127.0.0.1");
 import { toolDefinitions, executeTool } from "./tools/index.js";
@@ -266,6 +266,7 @@ export class Agent {
 
     while (iterations < MAX_ITERATIONS) {
       iterations++;
+      this.pruneHistory(); // bound context so long sessions don't overflow
 
       let rawText = "";
       let emittedUpTo = 0;         // index up to which text events have been emitted
@@ -390,5 +391,21 @@ export class Agent {
 
   clearHistory() {
     this.messages = [this.messages[0]];
+  }
+
+  /**
+   * Bound the conversation to a character budget so long sessions don't exceed
+   * the model's context window. Always keeps the system prompt (index 0) and
+   * the most recent messages; drops the oldest non-system messages first.
+   */
+  private pruneHistory() {
+    const size = (m: Message) =>
+      typeof m.content === "string" ? m.content.length : JSON.stringify(m.content ?? "").length;
+    let total = this.messages.reduce((s, m) => s + size(m), 0);
+    const KEEP_RECENT = 4;
+    while (total > MAX_CONTEXT_CHARS && this.messages.length > 1 + KEEP_RECENT) {
+      const [removed] = this.messages.splice(1, 1); // drop the oldest non-system message
+      total -= size(removed);
+    }
   }
 }
