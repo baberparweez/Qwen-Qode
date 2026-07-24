@@ -1,5 +1,9 @@
 import chalk from "chalk";
 
+// Tracks whether an assistant text block is currently open, so streamed text
+// events append inline under a single header instead of re-printing it.
+let assistantActive = false;
+
 export const ui = {
   header() {
     console.log(chalk.bold.cyan("\n  ██████╗  ██████╗  ██████╗ ██████╗ ███████╗"));
@@ -25,15 +29,21 @@ export const ui = {
   },
 
   assistantStart() {
-    process.stdout.write(chalk.bold.cyan("\n  Qwen Qode\n"));
+    if (assistantActive) return;
+    assistantActive = true;
+    process.stdout.write(chalk.bold.cyan("\n  Qwen Qode\n  "));
   },
 
   assistantText(text: string) {
-    const indented = text
-      .split("\n")
-      .map((l) => "  " + l)
-      .join("\n");
-    console.log(chalk.white(indented));
+    if (!assistantActive) this.assistantStart();
+    // Stream inline; keep the 2-space gutter on any newlines within the chunk.
+    process.stdout.write(chalk.white(text.replace(/\n/g, "\n  ")));
+  },
+
+  assistantEnd() {
+    if (!assistantActive) return;
+    assistantActive = false;
+    process.stdout.write("\n");
   },
 
   toolCall(name: string, args: Record<string, unknown>) {

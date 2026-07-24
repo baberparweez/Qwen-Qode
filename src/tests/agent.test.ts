@@ -1,6 +1,32 @@
 import { describe, it } from "node:test";
 import { expect } from "./expect.js";
-import { parseToolCall, stripToolCall, safeStreamEnd, Agent } from "../agent.js";
+import { parseToolCall, stripToolCall, safeStreamEnd, looksLikeToolAttempt, Agent, type AgentEvent } from "../agent.js";
+
+/** Replace an Agent's OpenAI client with a mock that streams canned responses. */
+function withMock(agent: Agent, responses: Array<{ content: string; finish_reason?: string }>) {
+  let i = 0;
+  const client = {
+    chat: {
+      completions: {
+        create: async () => {
+          const r = responses[Math.min(i, responses.length - 1)];
+          i++;
+          async function* gen() {
+            const parts = r.content.match(/[\s\S]{1,8}/g) ?? [""];
+            for (const p of parts) yield { choices: [{ delta: { content: p }, finish_reason: null }] };
+            yield { choices: [{ delta: {}, finish_reason: r.finish_reason ?? "stop" }] };
+          }
+          return gen();
+        },
+      },
+    },
+  };
+  (agent as unknown as { client: typeof client }).client = client;
+}
+
+function collectText(events: AgentEvent[]): string {
+  return events.flatMap((e) => (e.type === "text" ? [e.content] : [])).join("");
+}
 
 describe("parseToolCall", () => {
   describe("tagged format <tool_call>...</tool_call>", () => {
@@ -167,5 +193,69 @@ describe("Agent system prompt", () => {
   it("falls back to the raw id for an unknown model", () => {
     const a = new Agent("/tmp", "some/custom-model");
     expect(a.getMessages()[0].content as string).toContain("some/custom-model");
+  });
+});
+
+describe("looksLikeToolAttempt", () => {
+  it("detects a tool call truncated mid-JSON", () => {
+    const text = `<tool_call>\n{"name": "edit_file", "args": {"path": "src/ui.ts", "old_string": "import chalk`;
+    expect(looksLikeToolAttempt(text)).toBe(true);
+  });
+
+  it("detects a truncated tag before the name value closes", () => {
+    expect(looksLikeToolAttempt(`<tool_call>{"name": "edit_fi`)).toBe(true);
+  });
+
+  it("detects a valid full tool call", () => {
+    expect(looksLikeToolAttempt(`<tool_call>{"name": "list_files", "args": {}}</tool_call>`)).toBe(true);
+  });
+
+  it("does NOT flag a final answer that merely discusses tools", () => {
+    const text = "parseToolCall uses a regex; the edit_file tool should back up files, and write_file overwrites.";
+    expect(looksLikeToolAttempt(text)).toBe(false);
+  });
+
+  it("does NOT flag JSON whose name is not a known tool", () => {
+    expect(looksLikeToolAttempt(`{"name": "John Smith", "role": "admin"}`)).toBe(false);
+  });
+
+  it("does NOT flag prose that mentions the <tool_call> tag conceptually", () => {
+    expect(looksLikeToolAttempt("The model emits a <tool_call> block to call a tool.")).toBe(false);
+  });
+});
+
+describe("Agent.run robustness", () => {
+  it("does not emit a max-iterations error when a final answer is produced", async () => {
+    const agent = new Agent("/tmp", "qwen/qwen3-coder-30b-a3b-instruct");
+    withMock(agent, [{ content: "Here is your answer. All done." }]);
+    const events: AgentEvent[] = [];
+    await agent.run("hi", (e) => events.push(e));
+    expect(events.filter((e) => e.type === "error").length).toBe(0);
+    expect(collectText(events)).toContain("Here is your answer");
+  });
+
+  it("never shows a truncated tool call as text — it retries instead", async () => {
+    const agent = new Agent("/tmp", "qwen/qwen3-coder-30b-a3b-instruct");
+    withMock(agent, [
+      { content: `<tool_call>\n{"name": "edit_file", "args": {"path": "a.ts", "old_string": "aaaa`, finish_reason: "length" },
+      { content: "OK, I made a smaller change instead." },
+    ]);
+    const events: AgentEvent[] = [];
+    await agent.run("edit the file", (e) => events.push(e));
+    const text = collectText(events);
+    expect(text).not.toContain("<tool_call>");
+    expect(text).not.toContain("edit_file");
+    expect(text).toContain("smaller change");
+    expect(events.filter((e) => e.type === "error").length).toBe(0);
+  });
+
+  it("reports a clean error after repeated invalid tool calls, not raw JSON", async () => {
+    const agent = new Agent("/tmp", "qwen/qwen3-coder-30b-a3b-instruct");
+    withMock(agent, [{ content: `<tool_call>{"name": "bash", "args": {"command": "ls` }]); // always invalid
+    const events: AgentEvent[] = [];
+    await agent.run("run ls", (e) => events.push(e));
+    expect(collectText(events)).not.toContain("<tool_call>");
+    const errors = events.filter((e) => e.type === "error");
+    expect(errors.length).toBe(1);
   });
 });

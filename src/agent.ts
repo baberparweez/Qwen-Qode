@@ -45,6 +45,7 @@ Available tools:
 ## Rules
 - Always use list_files or read_file to inspect the project before making changes.
 - When editing files, read them first, then use edit_file for targeted changes or write_file for full rewrites.
+- Keep every tool call small enough to finish in one response. For large changes, make several targeted edit_file calls (small old_string/new_string) rather than one big write_file — very long tool calls get cut off and fail.
 - Be concise. Show only changed lines, not entire unchanged files.
 - Never guess file contents — read them first.
 - Do not emit a <tool_call> and regular text in the same response. Either call a tool OR give your final answer.
@@ -161,6 +162,21 @@ export function parseToolCall(text: string): { name: string; args: Record<string
   return null;
 }
 
+/**
+ * True if `text` looks like a tool-call attempt that failed to parse — e.g. a
+ * tool call truncated mid-JSON, or with invalid escaping. Distinguished from a
+ * final answer that merely mentions tools in prose: we require a KNOWN tool
+ * name in `"name": "…"` JSON-key position, or an opened <tool_call> tag whose
+ * JSON body has begun a name key. This lets the loop recover (ask the model to
+ * re-emit) instead of dumping the broken block to the user.
+ */
+export function looksLikeToolAttempt(text: string): boolean {
+  const named = /"name"\s*:\s*"([^"]+)"/.exec(text);
+  if (named && TOOL_NAMES.has(named[1])) return true;
+  if (/<tool_call>\s*\{[\s\S]*?"name"/.test(text)) return true;
+  return false;
+}
+
 export function stripToolCall(text: string): string {
   let out = text.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "");
   const jsonMatch = /\{[\s\S]*"name"\s*:\s*"([^"]+)"[\s\S]*\}/.exec(out);
@@ -244,12 +260,16 @@ export class Agent {
     }
 
     let iterations = 0;
+    let ended = false;            // concluded with a final answer or a handled error
+    let malformedRetries = 0;     // consecutive unparseable tool-call attempts
+    const MAX_MALFORMED_RETRIES = 2;
 
     while (iterations < MAX_ITERATIONS) {
       iterations++;
 
       let rawText = "";
-      let emittedUpTo = 0;   // index in rawText up to which we've emitted text events
+      let emittedUpTo = 0;         // index up to which text events have been emitted
+      let finishReason: string | null = null;
 
       // Stream the model response. Retry the request only while no text has been
       // shown to the user yet (a clean connection-time failure) — retrying after
@@ -259,6 +279,7 @@ export class Agent {
       for (let attempt = 1; attempt <= MAX_ATTEMPTS && !streamed; attempt++) {
         rawText = "";
         emittedUpTo = 0;
+        finishReason = null;
         try {
           const stream = await this.client.chat.completions.create({
             model: this.model,
@@ -269,7 +290,9 @@ export class Agent {
           });
 
           for await (const chunk of stream) {
-            const delta = chunk.choices[0]?.delta?.content ?? "";
+            const choice = chunk.choices[0];
+            if (choice?.finish_reason) finishReason = choice.finish_reason;
+            const delta = choice?.delta?.content ?? "";
             if (!delta) continue;
             rawText += delta;
 
@@ -294,32 +317,68 @@ export class Agent {
 
       const toolCall = parseToolCall(rawText);
 
-      if (!toolCall) {
-        // No tool call — emit whatever text wasn't streamed yet (e.g. trailing whitespace)
-        const remaining = rawText.slice(emittedUpTo).trim();
-        if (remaining) onEvent({ type: "text", content: remaining });
+      // ── A valid tool call: execute it and continue the loop. ──
+      if (toolCall) {
+        malformedRetries = 0;
+        // Prose before the call was already streamed; emit it now only if the
+        // whole response was withheld (the call started at the very beginning).
+        const prose = stripToolCall(rawText);
+        if (prose && emittedUpTo === 0) onEvent({ type: "text", content: prose });
+
+        onEvent({ type: "tool_call", name: toolCall.name, args: toolCall.args });
+        const result = await executeTool(toolCall.name, toolCall.args, this.cwd);
+        onEvent({ type: "tool_result", name: toolCall.name, success: result.success, output: result.output });
+
         this.messages.push({ role: "assistant", content: rawText });
+        this.messages.push({
+          role: "user",
+          content: `<tool_result name="${toolCall.name}" success="${result.success}">\n${result.output}\n</tool_result>`,
+        });
+        continue;
+      }
+
+      // ── A tool call that could not be parsed (truncated or invalid JSON). ──
+      // Never show the broken block to the user; ask the model to redo it.
+      if (looksLikeToolAttempt(rawText)) {
+        if (malformedRetries < MAX_MALFORMED_RETRIES) {
+          malformedRetries++;
+          this.messages.push({ role: "assistant", content: rawText });
+          this.messages.push({
+            role: "user",
+            content: finishReason === "length"
+              ? "Your previous tool call was cut off because it was too long. Make a smaller, targeted change — use edit_file with a short old_string/new_string, or split it into several edit_file calls — then re-emit exactly one valid <tool_call>."
+              : "Your previous tool call was not valid JSON and could not be parsed. Re-emit exactly one tool call as <tool_call>{...}</tool_call> with valid, properly-escaped JSON.",
+          });
+          continue;
+        }
+        // Repeated failures — surface a clean message, never the raw JSON.
+        onEvent({
+          type: "error",
+          message: finishReason === "length"
+            ? "The model kept producing tool calls too large to complete. Ask for a smaller, more targeted change (e.g. edit one function at a time)."
+            : "The model repeatedly emitted an invalid tool call. Try rephrasing the request.",
+        });
+        this.messages.push({ role: "assistant", content: rawText });
+        ended = true;
         break;
       }
 
-      // Tool call found. Any prose before it was already streamed token-by-token.
-      // If nothing was emitted yet (edge case), emit the stripped prose now.
-      const prose = stripToolCall(rawText);
-      if (prose && emittedUpTo === 0) onEvent({ type: "text", content: prose });
-
-      onEvent({ type: "tool_call", name: toolCall.name, args: toolCall.args });
-      const result = await executeTool(toolCall.name, toolCall.args, this.cwd);
-      onEvent({ type: "tool_result", name: toolCall.name, success: result.success, output: result.output });
-
+      // ── A genuine final answer. ──
+      const remaining = rawText.slice(emittedUpTo).trim();
+      if (remaining) onEvent({ type: "text", content: remaining });
+      if (finishReason === "length") {
+        onEvent({ type: "text", content: "\n\n(Note: the response was cut off at the length limit. Ask me to continue.)" });
+      }
       this.messages.push({ role: "assistant", content: rawText });
-      this.messages.push({
-        role: "user",
-        content: `<tool_result name="${toolCall.name}" success="${result.success}">\n${result.output}\n</tool_result>`,
-      });
+      ended = true;
+      break;
     }
 
-    if (iterations >= MAX_ITERATIONS) {
-      onEvent({ type: "error", message: `Reached max iterations (${MAX_ITERATIONS})` });
+    if (!ended && iterations >= MAX_ITERATIONS) {
+      onEvent({
+        type: "error",
+        message: `Stopped after ${MAX_ITERATIONS} tool calls without finishing. Ask me to continue, or break the task into smaller steps.`,
+      });
     }
 
     onEvent({ type: "done" });

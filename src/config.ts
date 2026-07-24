@@ -25,8 +25,8 @@ export const API_KEY =
 export const MODEL =
   process.env.QWEN_MODEL ?? "qwen/qwen3-coder-30b-a3b-instruct";
 
-export const MAX_TOKENS = 8192;
-export const MAX_ITERATIONS = 30;
+export const MAX_TOKENS = 16384;
+export const MAX_ITERATIONS = 50;
 
 const isLocal = BASE_URL.includes("localhost") || BASE_URL.includes("127.0.0.1");
 

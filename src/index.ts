@@ -21,19 +21,21 @@ const opts = program.opts<{ project: string; message?: string; web?: boolean }>(
 function handleEvent(event: AgentEvent) {
   switch (event.type) {
     case "text":
-      ui.assistantStart();
-      ui.assistantText(event.content);
+      ui.assistantText(event.content); // opens the block on the first chunk
       break;
     case "tool_call":
+      ui.assistantEnd();               // close any open assistant text first
       ui.toolCall(event.name, event.args);
       break;
     case "tool_result":
       ui.toolResult(event.name, event.success, event.output);
       break;
     case "error":
+      ui.assistantEnd();
       ui.error(event.message);
       break;
     case "done":
+      ui.assistantEnd();
       break;
   }
 }
@@ -64,10 +66,12 @@ async function main() {
 
   if (opts.message) {
     ui.thinking();
+    let firstEvent = true;
     await agent.run(opts.message, (e) => {
-      ui.clearLine();
+      if (firstEvent) { ui.clearLine(); firstEvent = false; } // clear "Thinking…" once
       handleEvent(e);
     });
+    ui.assistantEnd();
     return;
   }
 
@@ -118,12 +122,14 @@ async function main() {
 
     rl.pause();
     ui.thinking();
+    let firstEvent = true;
     try {
       await agent.run(input, (e) => {
-        ui.clearLine();
+        if (firstEvent) { ui.clearLine(); firstEvent = false; } // clear "Thinking…" once
         handleEvent(e);
       });
     } catch (e) {
+      ui.assistantEnd();
       ui.clearLine();
       ui.error(String(e));
     }
