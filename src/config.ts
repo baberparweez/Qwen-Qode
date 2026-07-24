@@ -61,13 +61,13 @@ export const MODELS: ModelOption[] = [
     id: "moonshotai/kimi-k2.7-code",
     name: "Kimi K2.7 Code",
     vision: false,
-    description: "Moonshot AI's code-specialised model — strong agentic coding (its thinking is hidden in the UI)",
+    description: "Moonshot AI's code-specialised model — strong agentic coding (a reasoning model; shows its thinking)",
   },
   {
     id: "z-ai/glm-5.2",
     name: "GLM-5.2",
     vision: false,
-    description: "Reasoning model from Z.ai — strong all-round coding (its thinking is hidden in the UI)",
+    description: "Reasoning model from Z.ai — strong all-round coding (shows its thinking)",
   },
   {
     id: "qwen/qwen3-vl-235b-a22b-instruct",

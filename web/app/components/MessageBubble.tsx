@@ -1,7 +1,38 @@
 "use client";
+import { useState } from "react";
 import { ToolCallBlock } from "./ToolCallBlock";
 import { highlightCode } from "./highlight";
 import type { ChatMessage } from "./types";
+
+function ReasoningBlock({ text }: { text: string }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          background: "transparent", border: "none", cursor: "pointer", color: "var(--text-muted)",
+          display: "flex", alignItems: "center", gap: 6, padding: "2px 0", fontSize: 12,
+        }}
+      >
+        <span>💭</span>
+        <span style={{ fontWeight: 600 }}>Reasoning</span>
+        <span style={{ fontSize: 9 }}>{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div
+          style={{
+            marginTop: 6, padding: "10px 12px", background: "var(--surface)",
+            border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-muted)",
+            fontSize: 12.5, lineHeight: 1.6, whiteSpace: "pre-wrap", maxHeight: 280, overflowY: "auto",
+          }}
+        >
+          {text}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function renderText(text: string) {
   // Very light markdown: fenced code blocks and inline code
@@ -121,6 +152,8 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
       >
         Qwen Qode
       </div>
+
+      {message.reasoning && <ReasoningBlock text={message.reasoning} />}
 
       {message.toolCalls && message.toolCalls.length > 0 && (
         <div style={{ marginBottom: 12 }}>

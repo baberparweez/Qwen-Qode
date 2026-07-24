@@ -1,10 +1,21 @@
 import { describe, it } from "node:test";
 import { expect } from "./expect.js";
+import { mkdtempSync, writeFileSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import { parseToolCall, stripToolCall, safeStreamEnd, looksLikeToolAttempt, Agent, type AgentEvent } from "../agent.js";
 
+interface MockResponse {
+  content?: string;
+  reasoning?: string;
+  toolCall?: { name: string; args: string }; // native tool call (delta.tool_calls)
+  finish_reason?: string;
+}
+
 /** Replace an Agent's OpenAI client with a mock that streams canned responses. */
-function withMock(agent: Agent, responses: Array<{ content: string; finish_reason?: string }>) {
+function withMock(agent: Agent, responses: MockResponse[]) {
   let i = 0;
+  const chunk = (delta: unknown) => ({ choices: [{ delta, finish_reason: null }] });
   const client = {
     chat: {
       completions: {
@@ -12,9 +23,12 @@ function withMock(agent: Agent, responses: Array<{ content: string; finish_reaso
           const r = responses[Math.min(i, responses.length - 1)];
           i++;
           async function* gen() {
-            const parts = r.content.match(/[\s\S]{1,8}/g) ?? [""];
-            for (const p of parts) yield { choices: [{ delta: { content: p }, finish_reason: null }] };
-            yield { choices: [{ delta: {}, finish_reason: r.finish_reason ?? "stop" }] };
+            for (const p of (r.reasoning ?? "").match(/[\s\S]{1,8}/g) ?? []) yield chunk({ reasoning: p });
+            if (r.toolCall) {
+              yield chunk({ tool_calls: [{ index: 0, function: { name: r.toolCall.name, arguments: r.toolCall.args } }] });
+            }
+            for (const p of (r.content ?? "").match(/[\s\S]{1,8}/g) ?? []) yield chunk({ content: p });
+            yield { choices: [{ delta: {}, finish_reason: r.finish_reason ?? (r.toolCall ? "tool_calls" : "stop") }] };
           }
           return gen();
         },
@@ -257,6 +271,39 @@ describe("Agent.run robustness", () => {
     expect(collectText(events)).not.toContain("<tool_call>");
     const errors = events.filter((e) => e.type === "error");
     expect(errors.length).toBe(1);
+  });
+
+  it("executes a NATIVE tool call (delta.tool_calls) and surfaces reasoning", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "qq-native-"));
+    writeFileSync(join(dir, "hello.ts"), "x");
+    try {
+      const agent = new Agent(dir, "moonshotai/kimi-k2.7-code");
+      withMock(agent, [
+        { reasoning: "I should list the files first.", toolCall: { name: "list_files", args: '{"path":"."}' } },
+        { content: "Found hello.ts." },
+      ]);
+      const events: AgentEvent[] = [];
+      await agent.run("list files", (e) => events.push(e));
+      expect(events.some((e) => e.type === "reasoning")).toBe(true);
+      expect(events.some((e) => e.type === "tool_call" && e.name === "list_files")).toBe(true);
+      expect(events.some((e) => e.type === "tool_result")).toBe(true);
+      expect(collectText(events)).toContain("Found hello.ts");
+      expect(events.filter((e) => e.type === "error").length).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers from a native tool call whose arguments JSON is truncated", async () => {
+    const agent = new Agent("/tmp", "moonshotai/kimi-k2.7-code");
+    withMock(agent, [
+      { toolCall: { name: "list_files", args: '{"path":' } }, // invalid/truncated args
+      { content: "Recovered and answered." },
+    ]);
+    const events: AgentEvent[] = [];
+    await agent.run("list files", (e) => events.push(e));
+    expect(collectText(events)).toContain("Recovered and answered");
+    expect(events.filter((e) => e.type === "error").length).toBe(0);
   });
 });
 

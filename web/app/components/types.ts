@@ -1,5 +1,6 @@
 export type AgentEvent =
   | { type: "text"; content: string }
+  | { type: "reasoning"; content: string }
   | { type: "tool_call"; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; name: string; success: boolean; output: string }
   | { type: "error"; message: string }
@@ -12,7 +13,7 @@ export type ToolCallPair = {
 
 export type ChatMessage =
   | { role: "user"; content: string; images?: string[] }
-  | { role: "assistant"; content: string; toolCalls?: ToolCallPair[] }
+  | { role: "assistant"; content: string; toolCalls?: ToolCallPair[]; reasoning?: string }
   | { role: "error"; content: string };
 
 export interface Session {

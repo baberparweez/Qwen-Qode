@@ -55,6 +55,7 @@ export type Message = OpenAI.Chat.ChatCompletionMessageParam;
 
 export type AgentEvent =
   | { type: "text"; content: string }
+  | { type: "reasoning"; content: string }
   | { type: "tool_call"; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; name: string; success: boolean; output: string }
   | { type: "error"; message: string }
@@ -271,6 +272,7 @@ export class Agent {
       let rawText = "";
       let emittedUpTo = 0;         // index up to which text events have been emitted
       let finishReason: string | null = null;
+      let nativeCalls: Record<number, { name: string; args: string }> = {};
 
       // Stream the model response. Retry the request only while no text has been
       // shown to the user yet (a clean connection-time failure) — retrying after
@@ -281,6 +283,7 @@ export class Agent {
         rawText = "";
         emittedUpTo = 0;
         finishReason = null;
+        nativeCalls = {};
         try {
           const stream = await this.client.chat.completions.create({
             model: this.model,
@@ -293,9 +296,28 @@ export class Agent {
           for await (const chunk of stream) {
             const choice = chunk.choices[0];
             if (choice?.finish_reason) finishReason = choice.finish_reason;
-            const delta = choice?.delta?.content ?? "";
-            if (!delta) continue;
-            rawText += delta;
+            const delta = choice?.delta as {
+              content?: string | null;
+              reasoning?: string | null;
+              tool_calls?: Array<{ index?: number; function?: { name?: string; arguments?: string } }>;
+            } | undefined;
+
+            // Reasoning models stream chain-of-thought in a separate channel —
+            // surface it so the UI shows progress instead of looking hung.
+            if (delta?.reasoning) onEvent({ type: "reasoning", content: delta.reasoning });
+
+            // Agentic models (e.g. Kimi) emit the call as structured tool_calls
+            // rather than <tool_call> text — accumulate the fragments here.
+            for (const tc of delta?.tool_calls ?? []) {
+              const i = tc.index ?? 0;
+              nativeCalls[i] = nativeCalls[i] ?? { name: "", args: "" };
+              if (tc.function?.name) nativeCalls[i].name += tc.function.name;
+              if (tc.function?.arguments) nativeCalls[i].args += tc.function.arguments;
+            }
+
+            const text = delta?.content ?? "";
+            if (!text) continue;
+            rawText += text;
 
             // Emit prose up to the next possible tool-call marker (raw JSON or tag).
             const safeEnd = safeStreamEnd(rawText, emittedUpTo);
@@ -316,7 +338,21 @@ export class Agent {
         }
       }
 
-      const toolCall = parseToolCall(rawText);
+      // Prefer a native tool call (delta.tool_calls) over ReAct text parsing.
+      let toolCall = parseToolCall(rawText);
+      let fromNative = false;
+      let nativeMalformed = false;
+      if (!toolCall) {
+        const native = Object.values(nativeCalls)[0];
+        if (native?.name && TOOL_NAMES.has(native.name)) {
+          try {
+            toolCall = { name: native.name, args: native.args ? JSON.parse(native.args) : {} };
+            fromNative = true;
+          } catch {
+            nativeMalformed = true; // arguments JSON truncated or invalid
+          }
+        }
+      }
 
       // ── A valid tool call: execute it and continue the loop. ──
       if (toolCall) {
@@ -330,7 +366,12 @@ export class Agent {
         const result = await executeTool(toolCall.name, toolCall.args, this.cwd);
         onEvent({ type: "tool_result", name: toolCall.name, success: result.success, output: result.output });
 
-        this.messages.push({ role: "assistant", content: rawText });
+        // Normalize history to the text protocol: for a native tool call the
+        // content is empty, so record the call as text so the next turn is coherent.
+        const assistantContent = fromNative
+          ? `${rawText}<tool_call>${JSON.stringify({ name: toolCall.name, args: toolCall.args })}</tool_call>`.trim()
+          : rawText;
+        this.messages.push({ role: "assistant", content: assistantContent });
         this.messages.push({
           role: "user",
           content: `<tool_result name="${toolCall.name}" success="${result.success}">\n${result.output}\n</tool_result>`,
@@ -340,7 +381,7 @@ export class Agent {
 
       // ── A tool call that could not be parsed (truncated or invalid JSON). ──
       // Never show the broken block to the user; ask the model to redo it.
-      if (looksLikeToolAttempt(rawText)) {
+      if (nativeMalformed || looksLikeToolAttempt(rawText)) {
         if (malformedRetries < MAX_MALFORMED_RETRIES) {
           malformedRetries++;
           this.messages.push({ role: "assistant", content: rawText });

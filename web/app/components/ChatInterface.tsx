@@ -126,6 +126,7 @@ export function ChatInterface({ session, onClose }: Props) {
       const decoder = new TextDecoder();
       let buffer = "";
       let assistantText = "";
+      let reasoning = "";
       let toolCalls: ToolCallPair[] = [];
 
       while (true) {
@@ -142,6 +143,8 @@ export function ChatInterface({ session, onClose }: Props) {
 
           if (event.type === "text") {
             assistantText += event.content;
+          } else if (event.type === "reasoning") {
+            reasoning += event.content;
           } else if (event.type === "tool_call") {
             toolCalls = [...toolCalls, { call: { name: event.name, args: event.args } }];
           } else if (event.type === "tool_result") {
@@ -156,7 +159,7 @@ export function ChatInterface({ session, onClose }: Props) {
 
           setMessages((prev) => {
             const next = [...prev];
-            next[next.length - 1] = { role: "assistant", content: assistantText, toolCalls: [...toolCalls] };
+            next[next.length - 1] = { role: "assistant", content: assistantText, toolCalls: [...toolCalls], reasoning: reasoning || undefined };
             return next;
           });
         }
