@@ -52,6 +52,12 @@ export const MODELS: ModelOption[] = [
     description: "Flagship coding model — highest quality, higher cost",
   },
   {
+    id: "moonshotai/kimi-k2.7-code",
+    name: "Kimi K2.7 Code",
+    vision: false,
+    description: "Moonshot AI's code-specialised model — strong agentic coding (its thinking is hidden in the UI)",
+  },
+  {
     id: "z-ai/glm-5.2",
     name: "GLM-5.2",
     vision: false,
